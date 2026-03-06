@@ -39,6 +39,7 @@ export interface NodeData extends Record<string, unknown> {
   last_seen?: string
   response_time_ms?: number
   notes?: string
+  parent_id?: string
 }
 
 export interface EdgeData extends Record<string, unknown> {

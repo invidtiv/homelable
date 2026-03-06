@@ -26,11 +26,14 @@ interface NodeModalProps {
   onSubmit: (data: Partial<NodeData>) => void
   initial?: Partial<NodeData>
   title?: string
+  proxmoxNodes?: { id: string; label: string }[]
 }
+
+const CHILD_TYPES: NodeType[] = ['vm', 'lxc']
 
 // NodeModal is always mounted with a key that changes on open/edit, so useState
 // initial value is enough — no need for a reset effect.
-export function NodeModal({ open, onClose, onSubmit, initial, title = 'Add Node' }: NodeModalProps) {
+export function NodeModal({ open, onClose, onSubmit, initial, title = 'Add Node', proxmoxNodes = [] }: NodeModalProps) {
   const [form, setForm] = useState<Partial<NodeData>>({ ...DEFAULT_DATA, ...initial })
 
   const set = (key: keyof NodeData, value: unknown) =>
@@ -128,6 +131,27 @@ export function NodeModal({ open, onClose, onSubmit, initial, title = 'Add Node'
                 className="bg-[#21262d] border-[#30363d] font-mono text-sm h-8"
               />
             </div>
+
+            {/* Parent Proxmox (VM / LXC only) */}
+            {CHILD_TYPES.includes(form.type as NodeType) && proxmoxNodes.length > 0 && (
+              <div className="flex flex-col gap-1.5 col-span-2">
+                <Label className="text-xs text-muted-foreground">Parent Proxmox</Label>
+                <Select
+                  value={form.parent_id ?? 'none'}
+                  onValueChange={(v) => set('parent_id', v === 'none' ? undefined : v)}
+                >
+                  <SelectTrigger className="bg-[#21262d] border-[#30363d] text-sm h-8">
+                    <SelectValue placeholder="None (standalone)" />
+                  </SelectTrigger>
+                  <SelectContent className="bg-[#21262d] border-[#30363d]">
+                    <SelectItem value="none" className="text-sm">None (standalone)</SelectItem>
+                    {proxmoxNodes.map((n) => (
+                      <SelectItem key={n.id} value={n.id} className="text-sm">{n.label}</SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+              </div>
+            )}
 
             {/* Notes */}
             <div className="flex flex-col gap-1.5 col-span-2">

@@ -57,11 +57,13 @@ export default function App() {
       .then((res) => {
         const { nodes: apiNodes, edges: apiEdges } = res.data
         if (apiNodes.length > 0) {
-          const rfNodes = apiNodes.map((n: NodeData & { id: string; pos_x: number; pos_y: number }) => ({
+          const rfNodes = apiNodes.map((n: NodeData & { id: string; pos_x: number; pos_y: number; parent_id?: string }) => ({
             id: n.id,
             type: n.type,
             position: { x: n.pos_x, y: n.pos_y },
             data: n,
+            ...(n.parent_id ? { parentId: n.parent_id, extent: 'parent' as const } : {}),
+            ...(n.type === 'proxmox' ? { width: 300, height: 200 } : {}),
           }))
           const rfEdges = apiEdges.map((e: EdgeData & { id: string; source: string; target: string }) => ({
             id: e.id,
@@ -92,15 +94,24 @@ export default function App() {
 
   const handleAddNode = useCallback((data: Partial<NodeData>) => {
     const id = crypto.randomUUID()
+    const isProxmox = data.type === 'proxmox'
+    const parentNode = data.parent_id ? nodes.find((n) => n.id === data.parent_id) : null
+    // Children position is relative to parent; place near top-left with padding
+    const position = parentNode
+      ? { x: 20, y: 50 }
+      : { x: 300, y: 300 }
+
     const newNode: Node<NodeData> = {
       id,
       type: data.type ?? 'generic',
-      position: { x: 300, y: 300 },
+      position,
       data: { status: 'unknown', services: [], ...data } as NodeData,
+      ...(data.parent_id ? { parentId: data.parent_id, extent: 'parent' as const } : {}),
+      ...(isProxmox ? { width: 300, height: 200 } : {}),
     }
     addNode(newNode)
     toast.success(`Added "${data.label}"`)
-  }, [addNode])
+  }, [addNode, nodes])
 
   const handleEditNode = useCallback((id: string) => {
     setEditNodeId(id)
@@ -172,6 +183,7 @@ export default function App() {
           onClose={() => setAddNodeOpen(false)}
           onSubmit={handleAddNode}
           title="Add Node"
+          proxmoxNodes={nodes.filter((n) => n.type === 'proxmox').map((n) => ({ id: n.id, label: n.data.label }))}
         />
 
         {/* key forces re-mount when editing a different node, resetting form state */}
@@ -182,6 +194,7 @@ export default function App() {
           onSubmit={handleUpdateNode}
           initial={editNode?.data}
           title="Edit Node"
+          proxmoxNodes={nodes.filter((n) => n.type === 'proxmox').map((n) => ({ id: n.id, label: n.data.label }))}
         />
 
         <EdgeModal
