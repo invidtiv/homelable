@@ -1,4 +1,4 @@
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 
 from fastapi import APIRouter, Depends
 from sqlalchemy import select
@@ -34,7 +34,7 @@ async def save_canvas(body: CanvasSaveRequest, db: AsyncSession = Depends(get_db
     state = await db.get(CanvasState, 1)
     if state:
         state.viewport = body.viewport
-        state.saved_at = datetime.now(timezone.utc)
+        state.saved_at = datetime.now(UTC)
     else:
         db.add(CanvasState(id=1, viewport=body.viewport))
 

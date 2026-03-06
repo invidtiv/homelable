@@ -1,4 +1,4 @@
-import { useState, useEffect } from 'react'
+import { useState } from 'react'
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from '@/components/ui/dialog'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
@@ -28,12 +28,10 @@ interface NodeModalProps {
   title?: string
 }
 
+// NodeModal is always mounted with a key that changes on open/edit, so useState
+// initial value is enough — no need for a reset effect.
 export function NodeModal({ open, onClose, onSubmit, initial, title = 'Add Node' }: NodeModalProps) {
   const [form, setForm] = useState<Partial<NodeData>>({ ...DEFAULT_DATA, ...initial })
-
-  useEffect(() => {
-    setForm({ ...DEFAULT_DATA, ...initial })
-  }, [initial, open])
 
   const set = (key: keyof NodeData, value: unknown) =>
     setForm((f) => ({ ...f, [key]: value }))

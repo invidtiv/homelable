@@ -20,16 +20,3 @@ export const IotNode = (props: N) => <BaseNode {...props} icon={Cpu} glowColor="
 export const ApNode = (props: N) => <BaseNode {...props} icon={Wifi} glowColor="#00d4ff" />
 export const GenericNode = (props: N) => <BaseNode {...props} icon={Circle} glowColor="#8b949e" />
 
-export const nodeTypes = {
-  isp: IspNode,
-  router: RouterNode,
-  switch: SwitchNode,
-  server: ServerNode,
-  proxmox: ProxmoxNode,
-  vm: VmNode,
-  lxc: LxcNode,
-  nas: NasNode,
-  iot: IotNode,
-  ap: ApNode,
-  generic: GenericNode,
-}

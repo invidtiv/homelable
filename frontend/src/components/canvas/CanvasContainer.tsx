@@ -11,8 +11,8 @@ import {
 } from '@xyflow/react'
 import '@xyflow/react/dist/style.css'
 import { useCanvasStore } from '@/stores/canvasStore'
-import { nodeTypes } from './nodes'
-import { edgeTypes } from './edges'
+import { nodeTypes } from './nodes/nodeTypes'
+import { edgeTypes } from './edges/edgeTypes'
 import type { NodeData, EdgeData } from '@/types'
 
 interface CanvasContainerProps {

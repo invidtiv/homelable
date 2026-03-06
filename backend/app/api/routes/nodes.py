@@ -34,7 +34,9 @@ async def get_node(node_id: str, db: AsyncSession = Depends(get_db), _: str = De
 
 
 @router.patch("/{node_id}", response_model=NodeResponse)
-async def update_node(node_id: str, body: NodeUpdate, db: AsyncSession = Depends(get_db), _: str = Depends(get_current_user)):
+async def update_node(
+    node_id: str, body: NodeUpdate, db: AsyncSession = Depends(get_db), _: str = Depends(get_current_user)
+):
     node = await db.get(Node, node_id)
     if not node:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Node not found")

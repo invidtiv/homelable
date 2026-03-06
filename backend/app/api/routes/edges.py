@@ -35,7 +35,9 @@ async def delete_edge(edge_id: str, db: AsyncSession = Depends(get_db), _: str =
 
 
 @router.patch("/{edge_id}", response_model=EdgeResponse)
-async def update_edge(edge_id: str, body: EdgeUpdate, db: AsyncSession = Depends(get_db), _: str = Depends(get_current_user)):
+async def update_edge(
+    edge_id: str, body: EdgeUpdate, db: AsyncSession = Depends(get_db), _: str = Depends(get_current_user)
+):
     edge = await db.get(Edge, edge_id)
     if not edge:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Edge not found")

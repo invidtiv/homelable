@@ -2,7 +2,7 @@ auth:
   username: admin
   # Default password: "admin" — change this before deploying!
   # Generate a new hash: python scripts/hash_password.py yourpassword
-  password_hash: "$2b$12$EixZaYVK1fsbw1ZfbX3OXePaWxn96p36WQoeG6Lruj3vjPGga31lW"
+  password_hash: "$2b$12$o/LWyvmBc978CNpSsHxcveXN0WqjAGW/gBR0.U.HURWbaYD3GCDqS"
 
 scanner:
   ranges:

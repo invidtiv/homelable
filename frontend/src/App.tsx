@@ -1,4 +1,4 @@
-import { useEffect, useCallback, useState } from 'react'
+import { useEffect, useCallback, useRef, useState } from 'react'
 import { ReactFlowProvider, type Connection } from '@xyflow/react'
 import { type Node } from '@xyflow/react'
 import { TooltipProvider } from '@/components/ui/tooltip'
@@ -25,6 +25,23 @@ export default function App() {
   const [editNodeId, setEditNodeId] = useState<string | null>(null)
   const [pendingConnection, setPendingConnection] = useState<Connection | null>(null)
 
+  // Declare handleSave before the Ctrl+S effect so it is in scope
+  const handleSave = useCallback(async () => {
+    try {
+      const nodePositions = nodes.map((n) => ({ id: n.id, x: n.position.x, y: n.position.y }))
+      await canvasApi.save({ node_positions: nodePositions, viewport: {} })
+      markSaved()
+      toast.success('Canvas saved')
+    } catch {
+      markSaved()
+      toast.success('Canvas saved (local)')
+    }
+  }, [nodes, markSaved])
+
+  // Keep a ref so the keydown handler always calls the latest version
+  const handleSaveRef = useRef(handleSave)
+  useEffect(() => { handleSaveRef.current = handleSave }, [handleSave])
+
   // Load canvas on auth
   useEffect(() => {
     if (!isAuthenticated) return
@@ -32,7 +49,6 @@ export default function App() {
       .then((res) => {
         const { nodes: apiNodes, edges: apiEdges } = res.data
         if (apiNodes.length > 0) {
-          // Map API response to React Flow nodes
           const rfNodes = apiNodes.map((n: NodeData & { id: string; pos_x: number; pos_y: number }) => ({
             id: n.id,
             type: n.type,
@@ -59,25 +75,12 @@ export default function App() {
     const handler = (e: KeyboardEvent) => {
       if ((e.ctrlKey || e.metaKey) && e.key === 's') {
         e.preventDefault()
-        handleSave()
+        handleSaveRef.current()
       }
     }
     window.addEventListener('keydown', handler)
     return () => window.removeEventListener('keydown', handler)
-  })
-
-  const handleSave = useCallback(async () => {
-    try {
-      const nodePositions = nodes.map((n) => ({ id: n.id, x: n.position.x, y: n.position.y }))
-      await canvasApi.save({ node_positions: nodePositions, viewport: {} })
-      markSaved()
-      toast.success('Canvas saved')
-    } catch {
-      // Backend not running — mark saved anyway in dev
-      markSaved()
-      toast.success('Canvas saved (local)')
-    }
-  }, [nodes, markSaved])
+  }, [])
 
   const handleAddNode = useCallback((data: Partial<NodeData>) => {
     const id = crypto.randomUUID()
@@ -144,7 +147,9 @@ export default function App() {
           title="Add Node"
         />
 
+        {/* key forces re-mount when editing a different node, resetting form state */}
         <NodeModal
+          key={editNodeId ?? 'edit'}
           open={!!editNodeId}
           onClose={() => setEditNodeId(null)}
           onSubmit={handleUpdateNode}

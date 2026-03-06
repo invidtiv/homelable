@@ -22,13 +22,13 @@ const EDGE_STYLES: Record<EdgeType, React.CSSProperties> = {
   virtual: { stroke: '#8b949e', strokeWidth: 1, strokeDasharray: '4 4' },
 }
 
-function HomelableEdge({ id, sourceX, sourceY, targetX, targetY, sourcePosition, targetPosition, data, selected }: EdgeProps<Edge<EdgeData>>) {
+export function HomelableEdge({ id, sourceX, sourceY, targetX, targetY, sourcePosition, targetPosition, data, selected }: EdgeProps<Edge<EdgeData>>) {
   const [edgePath, labelX, labelY] = getBezierPath({ sourceX, sourceY, sourcePosition, targetX, targetY, targetPosition })
 
   const edgeType: EdgeType = data?.type ?? 'ethernet'
   const style: React.CSSProperties = {
     ...EDGE_STYLES[edgeType],
-    ...(edgeType === 'vlan' ? { stroke: getVlanColor(data?.vlan_id) } : {}),
+    ...(edgeType === 'vlan' ? { stroke: getVlanColor(data?.vlan_id as number | undefined) } : {}),
     ...(selected ? { stroke: '#00d4ff', filter: 'drop-shadow(0 0 4px #00d4ff88)' } : {}),
   }
 
@@ -46,18 +46,10 @@ function HomelableEdge({ id, sourceX, sourceY, targetX, targetY, sourcePosition,
               border: '1px solid #30363d',
             }}
           >
-            {data.label}
+            {data.label as string}
           </div>
         </EdgeLabelRenderer>
       )}
     </>
   )
-}
-
-export const edgeTypes = {
-  ethernet: HomelableEdge,
-  wifi: HomelableEdge,
-  iot: HomelableEdge,
-  vlan: HomelableEdge,
-  virtual: HomelableEdge,
 }

@@ -1,5 +1,6 @@
 """Generate a bcrypt password hash for config.yml."""
 import sys
+
 from passlib.context import CryptContext
 
 pwd_context = CryptContext(schemes=["bcrypt"], deprecated="auto")
