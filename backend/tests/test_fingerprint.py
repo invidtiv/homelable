@@ -50,11 +50,11 @@ def test_match_port_with_banner_no_match_falls_through_to_next():
     assert result["service_name"] == "Web UI"
 
 
-def test_match_port_no_banner_matches_first_sig():
-    # no banner → banner check is skipped entirely, first matching sig wins
+def test_match_port_no_banner_skips_banner_regex_sigs():
+    # no banner → banner_regex sigs are skipped, falls through to generic fallback
     result = match_port(8006, "tcp", banner=None)
     assert result is not None
-    assert result["service_name"] == "Proxmox API"
+    assert result["service_name"] == "Web UI"
 
 
 # ── fingerprint_ports ─────────────────────────────────────────────────────────

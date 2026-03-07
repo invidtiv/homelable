@@ -21,7 +21,7 @@ def match_port(port: int, protocol: str, banner: str | None = None) -> dict[str,
     for sig in _load():
         if sig["port"] != port or sig["protocol"] != protocol:
             continue
-        if sig.get("banner_regex") and banner and not re.search(sig["banner_regex"], banner, re.IGNORECASE):
+        if sig.get("banner_regex") and (not banner or not re.search(sig["banner_regex"], banner, re.IGNORECASE)):
             continue
         return sig
     return None
@@ -95,7 +95,7 @@ def suggest_node_type(open_ports: list[dict[str, Any]]) -> str:
         sig = match_port(port, proto)
         if sig and sig.get("suggested_node_type"):
             found.add(sig["suggested_node_type"])
-        elif port in _PORT_TYPE_HINTS:
+        if port in _PORT_TYPE_HINTS:
             found.add(_PORT_TYPE_HINTS[port])
     for t in priority:
         if t in found:
