@@ -65,3 +65,48 @@ async def test_list_nodes_returns_all(client: AsyncClient, headers: dict):
         await client.post("/api/v1/nodes", json={"type": "generic", "label": f"Node {i}", "status": "unknown"}, headers=headers)
     res = await client.get("/api/v1/nodes", headers=headers)
     assert len(res.json()) == 3
+
+
+async def test_update_node_not_found(client: AsyncClient, headers: dict):
+    res = await client.patch("/api/v1/nodes/nonexistent", json={"label": "X"}, headers=headers)
+    assert res.status_code == 404
+
+
+async def test_delete_node_not_found(client: AsyncClient, headers: dict):
+    res = await client.delete("/api/v1/nodes/nonexistent", headers=headers)
+    assert res.status_code == 404
+
+
+async def test_create_node_with_custom_colors(client: AsyncClient, headers: dict):
+    payload = {"type": "server", "label": "Styled", "status": "unknown", "custom_colors": {"border": "#ff0000", "background": "#001122", "icon": "#ffffff"}}
+    res = await client.post("/api/v1/nodes", json=payload, headers=headers)
+    assert res.status_code == 201
+    assert res.json()["custom_colors"] == {"border": "#ff0000", "background": "#001122", "icon": "#ffffff"}
+
+
+async def test_update_node_custom_colors(client: AsyncClient, headers: dict):
+    create = await client.post("/api/v1/nodes", json={"type": "server", "label": "N", "status": "unknown"}, headers=headers)
+    node_id = create.json()["id"]
+    res = await client.patch(f"/api/v1/nodes/{node_id}", json={"custom_colors": {"border": "#a855f7"}}, headers=headers)
+    assert res.status_code == 200
+    assert res.json()["custom_colors"] == {"border": "#a855f7"}
+
+
+async def test_create_proxmox_node_with_container_mode(client: AsyncClient, headers: dict):
+    payload = {"type": "proxmox", "label": "PVE", "status": "unknown", "container_mode": True}
+    res = await client.post("/api/v1/nodes", json=payload, headers=headers)
+    assert res.status_code == 201
+    assert res.json()["container_mode"] is True
+
+
+async def test_update_node_container_mode(client: AsyncClient, headers: dict):
+    create = await client.post("/api/v1/nodes", json={"type": "proxmox", "label": "PVE", "status": "unknown"}, headers=headers)
+    node_id = create.json()["id"]
+    res = await client.patch(f"/api/v1/nodes/{node_id}", json={"container_mode": True}, headers=headers)
+    assert res.status_code == 200
+    assert res.json()["container_mode"] is True
+
+
+async def test_create_node_requires_auth(client: AsyncClient):
+    res = await client.post("/api/v1/nodes", json={"type": "server", "label": "N", "status": "unknown"})
+    assert res.status_code == 403
