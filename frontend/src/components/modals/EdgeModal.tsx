@@ -5,7 +5,7 @@ import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
-import { EDGE_TYPE_LABELS, type EdgeData, type EdgeType } from '@/types'
+import { EDGE_TYPE_LABELS, type EdgeData, type EdgePathStyle, type EdgeType } from '@/types'
 import { EDGE_DEFAULT_COLORS } from '@/utils/edgeColors'
 
 const EDGE_TYPES = Object.entries(EDGE_TYPE_LABELS) as [EdgeType, string][]
@@ -24,6 +24,7 @@ export function EdgeModal({ open, onClose, onSubmit, onDelete, initial, title = 
   const [label, setLabel] = useState(initial?.label ?? '')
   const [vlanId, setVlanId] = useState(initial?.vlan_id?.toString() ?? '')
   const [customColor, setCustomColor] = useState<string | undefined>(initial?.custom_color)
+  const [pathStyle, setPathStyle] = useState<EdgePathStyle>(initial?.path_style ?? 'bezier')
 
   const effectiveColor = customColor ?? EDGE_DEFAULT_COLORS[type]
 
@@ -34,6 +35,7 @@ export function EdgeModal({ open, onClose, onSubmit, onDelete, initial, title = 
       label: label || undefined,
       vlan_id: type === 'vlan' && vlanId ? parseInt(vlanId) : undefined,
       custom_color: customColor,
+      path_style: pathStyle,
     })
     onClose()
   }
@@ -88,6 +90,27 @@ export function EdgeModal({ open, onClose, onSubmit, onDelete, initial, title = 
               placeholder="e.g. 1G, trunk..."
               className="bg-[#21262d] border-[#30363d] text-sm h-8"
             />
+          </div>
+
+          <div className="flex flex-col gap-1.5">
+            <Label className="text-xs text-muted-foreground">Path Style</Label>
+            <div className="flex rounded-md overflow-hidden border border-[#30363d]">
+              {(['bezier', 'smooth'] as EdgePathStyle[]).map((style) => (
+                <button
+                  key={style}
+                  type="button"
+                  onClick={() => setPathStyle(style)}
+                  className="flex-1 py-1 text-xs capitalize transition-colors"
+                  style={{
+                    background: pathStyle === style ? '#00d4ff22' : '#21262d',
+                    color: pathStyle === style ? '#00d4ff' : '#8b949e',
+                    borderRight: style === 'bezier' ? '1px solid #30363d' : undefined,
+                  }}
+                >
+                  {style === 'bezier' ? 'Bezier' : 'Smooth step'}
+                </button>
+              ))}
+            </div>
           </div>
 
           <div className="flex flex-col gap-1.5">

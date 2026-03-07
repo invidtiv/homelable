@@ -2,6 +2,7 @@ import {
   BaseEdge,
   EdgeLabelRenderer,
   getBezierPath,
+  getSmoothStepPath,
   type EdgeProps,
   type Edge,
 } from '@xyflow/react'
@@ -23,7 +24,10 @@ const EDGE_STYLES: Record<EdgeType, React.CSSProperties> = {
 }
 
 export function HomelableEdge({ id, sourceX, sourceY, targetX, targetY, sourcePosition, targetPosition, data, selected }: EdgeProps<Edge<EdgeData>>) {
-  const [edgePath, labelX, labelY] = getBezierPath({ sourceX, sourceY, sourcePosition, targetX, targetY, targetPosition })
+  const pathArgs = { sourceX, sourceY, sourcePosition, targetX, targetY, targetPosition }
+  const [edgePath, labelX, labelY] = data?.path_style === 'smooth'
+    ? getSmoothStepPath({ ...pathArgs, borderRadius: 8 })
+    : getBezierPath(pathArgs)
 
   const edgeType: EdgeType = data?.type ?? 'ethernet'
   const customColor = data?.custom_color as string | undefined

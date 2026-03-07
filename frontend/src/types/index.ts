@@ -44,12 +44,15 @@ export interface NodeData extends Record<string, unknown> {
   custom_colors?: { border?: string; background?: string; icon?: string }
 }
 
+export type EdgePathStyle = 'bezier' | 'smooth'
+
 export interface EdgeData extends Record<string, unknown> {
   type: EdgeType
   label?: string
   vlan_id?: number
   speed?: string
   custom_color?: string
+  path_style?: EdgePathStyle
 }
 
 export const NODE_TYPE_LABELS: Record<NodeType, string> = {

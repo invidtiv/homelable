@@ -65,6 +65,7 @@ export default function App() {
         vlan_id: e.data?.vlan_id ?? null,
         speed: e.data?.speed ?? null,
         custom_color: e.data?.custom_color ?? null,
+        path_style: e.data?.path_style ?? null,
       }))
       await canvasApi.save({ nodes: nodesToSave, edges: edgesToSave, viewport: {} })
       markSaved()
