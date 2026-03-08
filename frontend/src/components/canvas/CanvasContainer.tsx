@@ -73,6 +73,7 @@ export function CanvasContainer({ onConnect: onConnectProp, onEdgeDoubleClick }:
         snapGrid={[16, 16]}
         fitView
         colorMode="dark"
+        connectionMode="loose"
       >
         <Background
           variant={BackgroundVariant.Dots}
