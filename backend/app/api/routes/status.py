@@ -2,6 +2,8 @@ import json
 
 from fastapi import APIRouter, WebSocket, WebSocketDisconnect
 
+from app.core.security import decode_token
+
 router = APIRouter()
 
 # Active WebSocket connections
@@ -9,7 +11,10 @@ _connections: list[WebSocket] = []
 
 
 @router.websocket("/ws/status")
-async def ws_status(websocket: WebSocket) -> None:
+async def ws_status(websocket: WebSocket, token: str | None = None) -> None:
+    if not token or not decode_token(token):
+        await websocket.close(code=1008)  # Policy Violation
+        return
     await websocket.accept()
     _connections.append(websocket)
     try:

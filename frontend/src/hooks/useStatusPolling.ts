@@ -22,7 +22,7 @@ export function useStatusPolling() {
 
     const protocol = window.location.protocol === 'https:' ? 'wss' : 'ws'
     const host = window.location.hostname
-    const url = `${protocol}://${host}:8000/api/v1/status/ws/status`
+    const url = `${protocol}://${host}:8000/api/v1/status/ws/status?token=${encodeURIComponent(token)}`
 
     const ws = new WebSocket(url)
     wsRef.current = ws
