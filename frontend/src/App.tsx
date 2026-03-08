@@ -67,8 +67,10 @@ export default function App() {
         speed: e.data?.speed ?? null,
         custom_color: e.data?.custom_color ?? null,
         path_style: e.data?.path_style ?? null,
-        source_handle: e.sourceHandle ?? null,
-        target_handle: e.targetHandle ?? null,
+        // Normalize stub handle IDs: "top-t" / "bottom-t" are invisible target stubs;
+        // map them back to their canonical source handle ID so reload works correctly.
+        source_handle: e.sourceHandle === 'top-t' ? 'top' : e.sourceHandle === 'bottom-t' ? 'bottom' : (e.sourceHandle ?? null),
+        target_handle: e.targetHandle === 'top-t' ? 'top' : e.targetHandle === 'bottom-t' ? 'bottom' : (e.targetHandle ?? null),
       }))
       await canvasApi.save({ nodes: nodesToSave, edges: edgesToSave, viewport: {} })
       markSaved()
@@ -162,13 +164,36 @@ export default function App() {
 
   const handleUpdateNode = useCallback((data: Partial<NodeData>) => {
     if (!editNodeId) return
+    const existingNode = nodes.find((n) => n.id === editNodeId)
     updateNode(editNodeId, data)
     // If proxmox container_mode changed, apply structural changes (children parentId, node dimensions)
     if (data.type === 'proxmox' && typeof data.container_mode === 'boolean') {
       setProxmoxContainerMode(editNodeId, data.container_mode)
     }
+    // Sync virtual edge when parent_id changes on an LXC/VM node
+    const nodeType = data.type ?? existingNode?.data.type
+    if ((nodeType === 'lxc' || nodeType === 'vm') && 'parent_id' in data) {
+      const oldParentId = existingNode?.data.parent_id ?? null
+      const newParentId = data.parent_id ?? null
+      if (oldParentId !== newParentId) {
+        // Remove any existing virtual edge between child and old parent
+        if (oldParentId) {
+          const oldEdge = edges.find((e) =>
+            e.data?.type === 'virtual' &&
+            ((e.source === editNodeId && e.target === oldParentId) ||
+             (e.source === oldParentId && e.target === editNodeId))
+          )
+          if (oldEdge) deleteEdge(oldEdge.id)
+        }
+        // Create new virtual edge: LXC top → Proxmox bottom
+        if (newParentId) {
+          // Pass type as extra field — canvasStore.onConnect casts to Connection & Partial<EdgeData>
+          onConnect({ source: editNodeId, sourceHandle: 'top', target: newParentId, targetHandle: 'bottom', type: 'virtual' } as unknown as Connection)
+        }
+      }
+    }
     setEditNodeId(null)
-  }, [editNodeId, updateNode, setProxmoxContainerMode])
+  }, [editNodeId, updateNode, setProxmoxContainerMode, nodes, edges, deleteEdge, onConnect])
 
   const handleAutoLayout = useCallback(() => {
     const laid = applyDagreLayout(nodes, edges)
@@ -193,9 +218,21 @@ export default function App() {
 
   const handleEdgeConfirm = useCallback((edgeData: EdgeData) => {
     if (!pendingConnection) return
-    onConnect({ ...pendingConnection, ...edgeData })
+    onConnect({ ...pendingConnection, ...edgeData } as unknown as Connection)
+    // When a virtual edge is drawn between LXC/VM (top) and Proxmox (bottom), sync parent_id
+    if (edgeData.type === 'virtual') {
+      const src = nodes.find((n) => n.id === pendingConnection.source)
+      const tgt = nodes.find((n) => n.id === pendingConnection.target)
+      const srcType = src?.data.type
+      const tgtType = tgt?.data.type
+      if ((srcType === 'lxc' || srcType === 'vm') && tgtType === 'proxmox') {
+        updateNode(pendingConnection.source, { parent_id: pendingConnection.target })
+      } else if (srcType === 'proxmox' && (tgtType === 'lxc' || tgtType === 'vm')) {
+        updateNode(pendingConnection.target, { parent_id: pendingConnection.source })
+      }
+    }
     setPendingConnection(null)
-  }, [pendingConnection, onConnect])
+  }, [pendingConnection, onConnect, nodes, updateNode])
 
   const handleEdgeDoubleClick = useCallback((edge: Edge<EdgeData>) => {
     setEditEdgeId(edge.id)

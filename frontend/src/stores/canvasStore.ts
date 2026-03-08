@@ -56,9 +56,15 @@ export const useCanvasStore = create<CanvasState>((set) => ({
     set((state) => {
       const extra = connection as Connection & Partial<EdgeData>
       const edgeType = extra.type ?? 'ethernet'
+      // Normalize invisible stub handle IDs so React Flow can locate the handle
+      // and render the edge immediately (top-t / bottom-t are opacity:0 helpers).
+      const normalizeHandle = (h: string | null | undefined) =>
+        h === 'top-t' ? 'top' : h === 'bottom-t' ? 'bottom' : (h ?? null)
       return {
         edges: addEdge({
           ...connection,
+          sourceHandle: normalizeHandle(extra.sourceHandle),
+          targetHandle: normalizeHandle(extra.targetHandle),
           type: edgeType,
           data: { type: edgeType, label: extra.label, vlan_id: extra.vlan_id, custom_color: extra.custom_color, path_style: extra.path_style },
         }, state.edges),
