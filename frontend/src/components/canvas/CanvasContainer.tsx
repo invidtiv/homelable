@@ -1,4 +1,4 @@
-import { useCallback, useMemo } from 'react'
+import { useCallback } from 'react'
 import {
   ReactFlow,
   Background,
@@ -39,28 +39,12 @@ export function CanvasContainer({ onConnect: onConnectProp, onEdgeDoubleClick }:
     onEdgeDoubleClick?.(edge)
   }, [onEdgeDoubleClick])
 
-  // Hide edges between a container-mode proxmox and its direct children
-  const visibleEdges = useMemo(() => {
-    const containerIds = new Set(
-      nodes
-        .filter((n) => n.type === 'proxmox' && n.data.container_mode !== false)
-        .map((n) => n.id)
-    )
-    const childParentMap = new Map(
-      nodes.filter((n) => n.data.parent_id).map((n) => [n.id, n.data.parent_id as string])
-    )
-    return (edges as Edge<EdgeData>[]).filter((e) => {
-      if (containerIds.has(e.source) && childParentMap.get(e.target) === e.source) return false
-      if (containerIds.has(e.target) && childParentMap.get(e.source) === e.target) return false
-      return true
-    })
-  }, [nodes, edges])
 
   return (
     <div className="w-full h-full">
       <ReactFlow
         nodes={nodes}
-        edges={visibleEdges}
+        edges={edges}
         onNodesChange={onNodesChange}
         onEdgesChange={onEdgesChange}
         onConnect={onConnectProp}
