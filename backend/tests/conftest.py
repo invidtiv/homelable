@@ -1,3 +1,8 @@
+import os
+
+# Must be set before any app import so pydantic-settings can resolve the required field.
+os.environ.setdefault("SECRET_KEY", "test-only-secret-key-not-for-production")
+
 import pytest
 from httpx import ASGITransport, AsyncClient
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
