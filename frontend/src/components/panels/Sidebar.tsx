@@ -222,27 +222,38 @@ function PendingDevicesPanel({ onNodeApproved }: { onNodeApproved: (nodeId: stri
         {!loading && devices.length === 0 && (
           <p className="text-xs text-muted-foreground text-center py-4">No pending devices</p>
         )}
-        {devices.map((d) => (
-          <button
-            key={d.id}
-            onClick={() => setSelected(d)}
-            className="w-full mb-1.5 p-2 rounded-md bg-[#21262d] text-xs text-left hover:bg-[#30363d] transition-colors border border-transparent hover:border-[#30363d]"
-          >
-            <div className="flex items-center gap-1.5">
-              <span className="w-1.5 h-1.5 rounded-full bg-[#e3b341] shrink-0" />
-              <span className="font-mono text-foreground truncate">{d.ip}</span>
-              {d.services.length > 0 && (
-                <span className="ml-auto text-[10px] text-muted-foreground shrink-0">
-                  {d.services.length} svc
-                </span>
+        {devices.map((d) => {
+          const recognized = d.services.find((s) => s.category != null)
+          const title = recognized?.service_name ?? d.hostname ?? d.ip
+          const showIpBelow = title !== d.ip
+          const hasSsh = d.services.some((s) => s.port === 22)
+          const hasHttp = d.services.some((s) => s.port === 80)
+          const hasHttps = d.services.some((s) => s.port === 443)
+          const otherCount = d.services.filter((s) => s.port !== 22 && s.port !== 80 && s.port !== 443).length
+          return (
+            <button
+              key={d.id}
+              onClick={() => setSelected(d)}
+              className="w-full mb-1.5 p-2 rounded-md bg-[#21262d] text-xs text-left hover:bg-[#30363d] transition-colors border border-transparent hover:border-[#30363d]"
+            >
+              <div className="flex items-center gap-1.5">
+                <span className="w-1.5 h-1.5 rounded-full bg-[#e3b341] shrink-0" />
+                <span className="text-foreground truncate font-medium">{title}</span>
+              </div>
+              {showIpBelow && (
+                <div className="font-mono text-muted-foreground truncate pl-3 text-[10px] mt-0.5">{d.ip}</div>
               )}
-            </div>
-            {d.hostname && <div className="text-muted-foreground truncate pl-3 text-[10px] mt-0.5">{d.hostname}</div>}
-            {d.suggested_type && (
-              <div className="text-[#8b949e] truncate pl-3 text-[10px]">{d.suggested_type}</div>
-            )}
-          </button>
-        ))}
+              {(hasSsh || hasHttp || hasHttps || otherCount > 0) && (
+                <div className="flex items-center gap-1 pl-3 mt-1.5 flex-wrap">
+                  {hasSsh && <ServiceBadge label="SSH" color="#a855f7" />}
+                  {hasHttp && <ServiceBadge label="HTTP" color="#00d4ff" />}
+                  {hasHttps && <ServiceBadge label="HTTPS" color="#39d353" />}
+                  {otherCount > 0 && <ServiceBadge label={`+${otherCount}`} color="#8b949e" />}
+                </div>
+              )}
+            </button>
+          )
+        })}
       </div>
 
       <PendingDeviceModal
@@ -383,6 +394,17 @@ function ScanHistoryPanel() {
         </div>
       ))}
     </div>
+  )
+}
+
+function ServiceBadge({ label, color }: { label: string; color: string }) {
+  return (
+    <span
+      className="px-1 py-0.5 rounded text-[9px] font-mono font-medium leading-none border"
+      style={{ color, borderColor: `${color}40`, backgroundColor: `${color}15` }}
+    >
+      {label}
+    </span>
   )
 }
 
