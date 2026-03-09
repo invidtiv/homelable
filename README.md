@@ -114,18 +114,6 @@ Proxmox nodes render as a resizable group container. VM and LXC nodes can be pla
 
 ---
 
-## Stack
-
-| Layer | Tech |
-|-------|------|
-| Frontend | React 18, TypeScript, Vite, React Flow v12, Zustand, Tailwind CSS, Shadcn/ui |
-| Backend | FastAPI, SQLAlchemy async, SQLite, APScheduler, python-nmap |
-| Auth | JWT (python-jose), bcrypt (passlib) |
-| Deployment | Docker Compose, nginx, systemd |
-
----
-
-
 ## Development Mode
 
 **Backend (Python 3.13):**
@@ -144,6 +132,5 @@ npm install
 npm run dev   # http://localhost:5173
 ```
 
-Default login: `admin` / `admin`
 
 ---
