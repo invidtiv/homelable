@@ -169,7 +169,7 @@ function PendingDevicesPanel({ onNodeApproved }: { onNodeApproved: (nodeId: stri
         ip: device.ip,
         hostname: device.hostname ?? undefined,
         status: 'unknown',
-        services: device.services ?? [],
+        services: (device.services ?? []) as import('@/types').ServiceInfo[],
       }
       const res = await scanApi.approve(device.id, nodeData)
       const nodeId = res.data.node_id
