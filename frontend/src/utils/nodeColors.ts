@@ -15,9 +15,13 @@ export const NODE_DEFAULT_COLORS: Record<NodeType, NodeColors> = {
   vm:      { border: '#a855f7', background: '#21262d', icon: '#a855f7' },
   lxc:     { border: '#00d4ff', background: '#21262d', icon: '#00d4ff' },
   nas:     { border: '#39d353', background: '#21262d', icon: '#39d353' },
-  iot:     { border: '#e3b341', background: '#21262d', icon: '#e3b341' },
-  ap:      { border: '#00d4ff', background: '#21262d', icon: '#00d4ff' },
-  generic: { border: '#8b949e', background: '#21262d', icon: '#8b949e' },
+  iot:      { border: '#e3b341', background: '#21262d', icon: '#e3b341' },
+  ap:       { border: '#00d4ff', background: '#21262d', icon: '#00d4ff' },
+  camera:   { border: '#8b949e', background: '#21262d', icon: '#8b949e' },
+  printer:  { border: '#8b949e', background: '#21262d', icon: '#8b949e' },
+  computer: { border: '#a855f7', background: '#21262d', icon: '#a855f7' },
+  cpl:      { border: '#e3b341', background: '#21262d', icon: '#e3b341' },
+  generic:  { border: '#8b949e', background: '#21262d', icon: '#8b949e' },
 }
 
 export function resolveNodeColors(data: Pick<NodeData, 'type' | 'custom_colors'>): NodeColors {

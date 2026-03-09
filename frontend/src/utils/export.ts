@@ -8,9 +8,9 @@ export async function exportToPng(element: HTMLElement): Promise<void> {
   const dataUrl = await toPng(element, {
     backgroundColor: '#0d1117',
     style: {
-      // Exclude controls and minimap from the export
+      // Exclude controls from the export
       '--xy-controls-display': 'none',
-    },
+    } as Partial<CSSStyleDeclaration>,
   })
 
   const link = document.createElement('a')

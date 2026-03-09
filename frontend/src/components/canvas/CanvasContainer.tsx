@@ -4,6 +4,7 @@ import {
   Background,
   Controls,
   BackgroundVariant,
+  ConnectionMode,
   type Node,
   type Edge,
   type Connection,
@@ -56,7 +57,7 @@ export function CanvasContainer({ onConnect: onConnectProp, onEdgeDoubleClick }:
         snapGrid={[16, 16]}
         fitView
         colorMode="dark"
-        connectionMode="loose"
+        connectionMode={ConnectionMode.Loose}
         isValidConnection={(connection) => connection.source !== connection.target}
       >
         <Background

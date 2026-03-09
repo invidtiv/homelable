@@ -165,7 +165,7 @@ function PendingDevicesPanel({ onNodeApproved }: { onNodeApproved: (nodeId: stri
     try {
       const nodeData = {
         label: device.hostname ?? device.ip,
-        type: device.suggested_type ?? 'generic',
+        type: (device.suggested_type ?? 'generic') as import('@/types').NodeType,
         ip: device.ip,
         hostname: device.hostname ?? undefined,
         status: 'unknown',
