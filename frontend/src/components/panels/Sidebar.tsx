@@ -1,5 +1,5 @@
 import { useState, useCallback, useEffect, useRef } from 'react'
-import { Network, Plus, Save, ScanLine, ChevronLeft, ChevronRight, LayoutDashboard, Clock, EyeOff, Trash2, RefreshCw, Loader2 } from 'lucide-react'
+import { Network, Plus, Save, ScanLine, ChevronLeft, ChevronRight, LayoutDashboard, Clock, EyeOff, Trash2, RefreshCw, Loader2, Square } from 'lucide-react'
 import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip'
 import { useCanvasStore } from '@/stores/canvasStore'
 import { scanApi } from '@/api/client'
@@ -30,18 +30,20 @@ interface ScanRun {
 
 interface SidebarProps {
   onAddNode: () => void
+  onAddGroupRect: () => void
   onScan: () => void
   onSave: () => void
   onNodeApproved: (nodeId: string) => void
 }
 
-export function Sidebar({ onAddNode, onScan, onSave, onNodeApproved }: SidebarProps) {
+export function Sidebar({ onAddNode, onAddGroupRect, onScan, onSave, onNodeApproved }: SidebarProps) {
   const [collapsed, setCollapsed] = useState(false)
   const [activeView, setActiveView] = useState<SidebarView>('canvas')
   const { nodes, hasUnsavedChanges } = useCanvasStore()
 
-  const onlineCount = nodes.filter((n) => n.data.status === 'online').length
-  const offlineCount = nodes.filter((n) => n.data.status === 'offline').length
+  const networkNodes = nodes.filter((n) => n.data.type !== 'groupRect')
+  const onlineCount = networkNodes.filter((n) => n.data.status === 'online').length
+  const offlineCount = networkNodes.filter((n) => n.data.status === 'offline').length
 
   const handleScan = useCallback(async () => {
     try {
@@ -110,7 +112,7 @@ export function Sidebar({ onAddNode, onScan, onSave, onNodeApproved }: SidebarPr
         <div className="px-3 py-2 border-t border-border text-xs text-muted-foreground space-y-0.5">
           <div className="flex justify-between">
             <span>Total</span>
-            <span className="text-foreground font-mono">{nodes.length}</span>
+            <span className="text-foreground font-mono">{networkNodes.length}</span>
           </div>
           <div className="flex justify-between">
             <span className="text-[#39d353]">Online</span>
@@ -126,6 +128,7 @@ export function Sidebar({ onAddNode, onScan, onSave, onNodeApproved }: SidebarPr
       {/* Actions */}
       <div className="flex flex-col gap-0.5 p-2 border-t border-border">
         <SidebarItem icon={Plus} label="Add Node" collapsed={collapsed} onClick={onAddNode} />
+        <SidebarItem icon={Square} label="Add Rectangle" collapsed={collapsed} onClick={onAddGroupRect} />
         {!STANDALONE && <SidebarItem icon={ScanLine} label="Scan Network" collapsed={collapsed} onClick={handleScan} />}
         <SidebarItem
           icon={Save}

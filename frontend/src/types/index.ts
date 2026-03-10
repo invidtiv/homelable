@@ -14,6 +14,18 @@ export type NodeType =
   | 'computer'
   | 'cpl'
   | 'generic'
+  | 'groupRect'
+
+export type TextPosition =
+  | 'top-left'
+  | 'top-center'
+  | 'top-right'
+  | 'middle-left'
+  | 'center'
+  | 'middle-right'
+  | 'bottom-left'
+  | 'bottom-center'
+  | 'bottom-right'
 
 export type EdgeType = 'ethernet' | 'wifi' | 'iot' | 'vlan' | 'virtual' | 'cluster'
 
@@ -45,7 +57,18 @@ export interface NodeData extends Record<string, unknown> {
   notes?: string
   parent_id?: string
   container_mode?: boolean
-  custom_colors?: { border?: string; background?: string; icon?: string }
+  custom_colors?: {
+    border?: string
+    background?: string
+    icon?: string
+    // Group rectangle extras (type === 'groupRect')
+    text_color?: string
+    text_position?: TextPosition
+    font?: string
+    z_order?: number
+    width?: number
+    height?: number
+  }
   custom_icon?: string
 }
 
@@ -76,6 +99,7 @@ export const NODE_TYPE_LABELS: Record<NodeType, string> = {
   computer: 'Computer',
   cpl: 'CPL / Powerline',
   generic: 'Generic Device',
+  groupRect: 'Group Rectangle',
 }
 
 export const STATUS_COLORS: Record<NodeStatus, string> = {

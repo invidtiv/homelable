@@ -28,6 +28,9 @@ interface CanvasState {
   updateEdge: (id: string, data: Partial<EdgeData>) => void
   deleteEdge: (id: string) => void
   setProxmoxContainerMode: (proxmoxId: string, enabled: boolean) => void
+  setNodeZIndex: (id: string, zIndex: number) => void
+  editingGroupRectId: string | null
+  setEditingGroupRectId: (id: string | null) => void
   markSaved: () => void
   loadCanvas: (nodes: Node<NodeData>[], edges: Edge<EdgeData>[]) => void
   notifyScanDeviceFound: () => void
@@ -38,6 +41,7 @@ export const useCanvasStore = create<CanvasState>((set) => ({
   edges: [],
   hasUnsavedChanges: false,
   selectedNodeId: null,
+  editingGroupRectId: null,
   scanEventTs: 0,
 
   onNodesChange: (changes) =>
@@ -140,6 +144,14 @@ export const useCanvasStore = create<CanvasState>((set) => ({
       }
       return { nodes, hasUnsavedChanges: true }
     }),
+
+  setNodeZIndex: (id, zIndex) =>
+    set((state) => ({
+      nodes: state.nodes.map((n) => n.id === id ? { ...n, zIndex } : n),
+      hasUnsavedChanges: true,
+    })),
+
+  setEditingGroupRectId: (id) => set({ editingGroupRectId: id }),
 
   markSaved: () => set({ hasUnsavedChanges: false }),
 

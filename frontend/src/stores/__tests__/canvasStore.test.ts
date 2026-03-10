@@ -25,6 +25,7 @@ describe('canvasStore', () => {
       edges: [],
       hasUnsavedChanges: false,
       selectedNodeId: null,
+      editingGroupRectId: null,
     })
   })
 
@@ -188,6 +189,40 @@ describe('canvasStore', () => {
     expect(nodes.find((n) => n.id === 'px')?.data.container_mode).toBe(false)
     expect(updatedChild?.parentId).toBeUndefined()
     expect(updatedChild?.extent).toBeUndefined()
+  })
+
+  it('setEditingGroupRectId sets and clears the editing id', () => {
+    useCanvasStore.getState().setEditingGroupRectId('rect-1')
+    expect(useCanvasStore.getState().editingGroupRectId).toBe('rect-1')
+    useCanvasStore.getState().setEditingGroupRectId(null)
+    expect(useCanvasStore.getState().editingGroupRectId).toBeNull()
+  })
+
+  it('setNodeZIndex updates the node zIndex and marks unsaved', () => {
+    useCanvasStore.getState().addNode(makeNode('n1'))
+    useCanvasStore.getState().markSaved()
+    useCanvasStore.getState().setNodeZIndex('n1', -5)
+    const node = useCanvasStore.getState().nodes.find((n) => n.id === 'n1')
+    expect(node?.zIndex).toBe(-5)
+    expect(useCanvasStore.getState().hasUnsavedChanges).toBe(true)
+  })
+
+  it('addNode with groupRect type preserves zIndex and dimensions', () => {
+    const rectNode: Node<NodeData> = {
+      id: 'rect-1',
+      type: 'groupRect',
+      position: { x: 100, y: 100 },
+      data: { label: 'Zone A', type: 'groupRect', status: 'unknown', services: [] },
+      width: 360,
+      height: 240,
+      zIndex: -9,
+    }
+    useCanvasStore.getState().addNode(rectNode)
+    const stored = useCanvasStore.getState().nodes.find((n) => n.id === 'rect-1')
+    expect(stored?.type).toBe('groupRect')
+    expect(stored?.zIndex).toBe(-9)
+    expect(stored?.width).toBe(360)
+    expect(stored?.height).toBe(240)
   })
 
   it('loadCanvas sorts parents before children', () => {

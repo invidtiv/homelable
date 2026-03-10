@@ -57,6 +57,7 @@ export function CanvasContainer({ onConnect: onConnectProp, onEdgeDoubleClick }:
         snapGrid={[16, 16]}
         fitView
         colorMode="dark"
+        elevateNodesOnSelect={false}
         connectionMode={ConnectionMode.Loose}
         isValidConnection={(connection) => connection.source !== connection.target}
       >

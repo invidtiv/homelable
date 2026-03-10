@@ -14,6 +14,7 @@ import { LoginPage } from '@/components/LoginPage'
 import { NodeModal } from '@/components/modals/NodeModal'
 import { EdgeModal } from '@/components/modals/EdgeModal'
 import { ScanConfigModal } from '@/components/modals/ScanConfigModal'
+import { GroupRectModal, type GroupRectFormData } from '@/components/modals/GroupRectModal'
 import { useCanvasStore } from '@/stores/canvasStore'
 import { useAuthStore } from '@/stores/authStore'
 import { canvasApi } from '@/api/client'
@@ -25,13 +26,14 @@ const STANDALONE = import.meta.env.VITE_STANDALONE === 'true'
 const STANDALONE_STORAGE_KEY = 'homelable_canvas'
 
 export default function App() {
-  const { loadCanvas, markSaved, selectedNodeId, addNode, updateNode, onConnect, updateEdge, deleteEdge, setProxmoxContainerMode, nodes, edges } = useCanvasStore()
+  const { loadCanvas, markSaved, selectedNodeId, addNode, updateNode, deleteNode, onConnect, updateEdge, deleteEdge, setProxmoxContainerMode, setNodeZIndex, editingGroupRectId, setEditingGroupRectId, nodes, edges } = useCanvasStore()
   const canvasRef = useRef<HTMLDivElement>(null)
   const { isAuthenticated } = useAuthStore()
 
   useStatusPolling()
 
   const [addNodeOpen, setAddNodeOpen] = useState(false)
+  const [addGroupRectOpen, setAddGroupRectOpen] = useState(false)
   const [editNodeId, setEditNodeId] = useState<string | null>(null)
   const [pendingConnection, setPendingConnection] = useState<Connection | null>(null)
   const [editEdgeId, setEditEdgeId] = useState<string | null>(null)
@@ -46,26 +48,55 @@ export default function App() {
         toast.success('Canvas saved')
         return
       }
-      const nodesToSave = nodes.map((n) => ({
-        id: n.id,
-        type: n.data.type,
-        label: n.data.label,
-        hostname: n.data.hostname ?? null,
-        ip: n.data.ip ?? null,
-        mac: n.data.mac ?? null,
-        os: n.data.os ?? null,
-        status: n.data.status,
-        check_method: n.data.check_method ?? null,
-        check_target: n.data.check_target ?? null,
-        services: n.data.services ?? [],
-        notes: n.data.notes ?? null,
-        parent_id: n.data.parent_id ?? null,
-        container_mode: n.data.container_mode ?? false,
-        custom_colors: n.data.custom_colors ?? null,
-        custom_icon: n.data.custom_icon ?? null,
-        pos_x: n.position.x,
-        pos_y: n.position.y,
-      }))
+      const nodesToSave = nodes.map((n) => {
+        if (n.data.type === 'groupRect') {
+          return {
+            id: n.id,
+            type: 'groupRect',
+            label: n.data.label,
+            hostname: null,
+            ip: null,
+            mac: null,
+            os: null,
+            status: 'unknown',
+            check_method: null,
+            check_target: null,
+            services: [],
+            notes: null,
+            parent_id: null,
+            container_mode: false,
+            custom_icon: null,
+            pos_x: n.position.x,
+            pos_y: n.position.y,
+            // Persist size and all rect config inside custom_colors
+            custom_colors: {
+              ...n.data.custom_colors,
+              width: n.measured?.width ?? n.width ?? 360,
+              height: n.measured?.height ?? n.height ?? 240,
+            },
+          }
+        }
+        return {
+          id: n.id,
+          type: n.data.type,
+          label: n.data.label,
+          hostname: n.data.hostname ?? null,
+          ip: n.data.ip ?? null,
+          mac: n.data.mac ?? null,
+          os: n.data.os ?? null,
+          status: n.data.status,
+          check_method: n.data.check_method ?? null,
+          check_target: n.data.check_target ?? null,
+          services: n.data.services ?? [],
+          notes: n.data.notes ?? null,
+          parent_id: n.data.parent_id ?? null,
+          container_mode: n.data.container_mode ?? false,
+          custom_colors: n.data.custom_colors ?? null,
+          custom_icon: n.data.custom_icon ?? null,
+          pos_x: n.position.x,
+          pos_y: n.position.y,
+        }
+      })
       const edgesToSave = edges.map((e) => ({
         id: e.id,
         source: e.source,
@@ -121,6 +152,20 @@ export default function App() {
               .map((n: NodeData & { id: string }) => [n.id, n.container_mode !== false])
           )
           const rfNodes = apiNodes.map((n: NodeData & { id: string; pos_x: number; pos_y: number; parent_id?: string }) => {
+            if (n.type === 'groupRect') {
+              const w = n.custom_colors?.width ?? 360
+              const h = n.custom_colors?.height ?? 240
+              const z = n.custom_colors?.z_order ?? 1
+              return {
+                id: n.id,
+                type: 'groupRect',
+                position: { x: n.pos_x, y: n.pos_y },
+                data: n,
+                width: w,
+                height: h,
+                zIndex: z - 10,
+              }
+            }
             const parentIsContainer = n.parent_id ? (proxmoxContainerMap.get(n.parent_id) ?? false) : false
             return {
               id: n.id,
@@ -180,6 +225,58 @@ export default function App() {
     addNode(newNode)
     toast.success(`Added "${data.label}"`)
   }, [addNode, nodes])
+
+  const handleAddGroupRect = useCallback((data: GroupRectFormData) => {
+    const id = crypto.randomUUID()
+    const newNode: Node<NodeData> = {
+      id,
+      type: 'groupRect',
+      position: { x: 200, y: 200 },
+      data: {
+        label: data.label,
+        type: 'groupRect',
+        status: 'unknown',
+        services: [],
+        custom_colors: {
+          border: data.border_color,
+          background: data.background_color,
+          text_color: data.text_color,
+          text_position: data.text_position,
+          font: data.font,
+          z_order: data.z_order,
+        },
+      },
+      width: 360,
+      height: 240,
+      zIndex: data.z_order - 10,
+    }
+    addNode(newNode)
+  }, [addNode])
+
+  const handleUpdateGroupRect = useCallback((data: GroupRectFormData) => {
+    if (!editingGroupRectId) return
+    const existing = nodes.find((n) => n.id === editingGroupRectId)
+    updateNode(editingGroupRectId, {
+      label: data.label,
+      custom_colors: {
+        ...existing?.data.custom_colors,
+        border: data.border_color,
+        background: data.background_color,
+        text_color: data.text_color,
+        text_position: data.text_position,
+        font: data.font,
+        z_order: data.z_order,
+      },
+    })
+    setNodeZIndex(editingGroupRectId, data.z_order - 10)
+    setEditingGroupRectId(null)
+  }, [editingGroupRectId, nodes, updateNode, setNodeZIndex, setEditingGroupRectId])
+
+  const handleDeleteGroupRect = useCallback(() => {
+    if (!editingGroupRectId) return
+    deleteNode(editingGroupRectId)
+    setEditingGroupRectId(null)
+  }, [editingGroupRectId, deleteNode, setEditingGroupRectId])
 
   const handleEditNode = useCallback((id: string) => {
     setEditNodeId(id)
@@ -284,6 +381,7 @@ export default function App() {
         <div className="flex h-screen w-screen overflow-hidden bg-[#0d1117]">
           <Sidebar
             onAddNode={() => setAddNodeOpen(true)}
+            onAddGroupRect={() => setAddGroupRectOpen(true)}
             onScan={() => setScanConfigOpen(true)}
             onSave={handleSave}
             onNodeApproved={setEditNodeId}
@@ -351,6 +449,37 @@ export default function App() {
             onScanNow={() => toast.success('Scan triggered')}
           />
         )}
+
+        <GroupRectModal
+          open={addGroupRectOpen}
+          onClose={() => setAddGroupRectOpen(false)}
+          onSubmit={handleAddGroupRect}
+          title="Add Rectangle"
+        />
+
+        {/* key forces re-mount when editing a different rect */}
+        <GroupRectModal
+          key={editingGroupRectId ?? 'rect-edit'}
+          open={!!editingGroupRectId}
+          onClose={() => setEditingGroupRectId(null)}
+          onSubmit={handleUpdateGroupRect}
+          onDelete={handleDeleteGroupRect}
+          initial={(() => {
+            const n = editingGroupRectId ? nodes.find((nd) => nd.id === editingGroupRectId) : null
+            if (!n) return undefined
+            const rc = n.data.custom_colors ?? {}
+            return {
+              label: n.data.label,
+              font: rc.font ?? 'inter',
+              text_color: rc.text_color ?? '#e6edf3',
+              text_position: rc.text_position ?? 'top-left',
+              border_color: rc.border ?? '#00d4ff',
+              background_color: rc.background ?? '#00d4ff0d',
+              z_order: rc.z_order ?? 1,
+            }
+          })()}
+          title="Edit Rectangle"
+        />
 
         <Toaster theme="dark" position="bottom-right" />
       </ReactFlowProvider>
