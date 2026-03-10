@@ -93,7 +93,7 @@ export function GroupRectModal({ open, onClose, onSubmit, onDelete, initial, tit
           {/* Font */}
           <div className="flex flex-col gap-1.5">
             <Label className="text-xs text-muted-foreground">Font</Label>
-            <Select value={form.font} onValueChange={(v) => set('font', v)}>
+            <Select value={form.font} onValueChange={(v: string) => set('font', v)}>
               <SelectTrigger className="bg-[#21262d] border-[#30363d] text-sm h-8">
                 <SelectValue />
               </SelectTrigger>
@@ -160,7 +160,7 @@ export function GroupRectModal({ open, onClose, onSubmit, onDelete, initial, tit
           {/* Z-order */}
           <div className="flex flex-col gap-1.5">
             <Label className="text-xs text-muted-foreground">Z-Order (1 = furthest back)</Label>
-            <Select value={String(form.z_order)} onValueChange={(v) => set('z_order', Number(v))}>
+            <Select value={String(form.z_order)} onValueChange={(v: string) => set('z_order', Number(v))}>
               <SelectTrigger className="bg-[#21262d] border-[#30363d] text-sm h-8">
                 <SelectValue />
               </SelectTrigger>

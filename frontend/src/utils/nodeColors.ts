@@ -22,6 +22,7 @@ export const NODE_DEFAULT_COLORS: Record<NodeType, NodeColors> = {
   computer: { border: '#a855f7', background: '#21262d', icon: '#a855f7' },
   cpl:      { border: '#e3b341', background: '#21262d', icon: '#e3b341' },
   generic:  { border: '#8b949e', background: '#21262d', icon: '#8b949e' },
+  groupRect: { border: '#00d4ff', background: 'transparent', icon: '#00d4ff' },
 }
 
 export function resolveNodeColors(data: Pick<NodeData, 'type' | 'custom_colors'>): NodeColors {
