@@ -35,6 +35,8 @@ interface CanvasState {
   markUnsaved: () => void
   loadCanvas: (nodes: Node<NodeData>[], edges: Edge<EdgeData>[]) => void
   notifyScanDeviceFound: () => void
+  hideIp: boolean
+  toggleHideIp: () => void
 }
 
 export const useCanvasStore = create<CanvasState>((set) => ({
@@ -43,6 +45,7 @@ export const useCanvasStore = create<CanvasState>((set) => ({
   hasUnsavedChanges: false,
   selectedNodeId: null,
   editingGroupRectId: null,
+  hideIp: false,
   scanEventTs: 0,
 
   onNodesChange: (changes) =>
@@ -159,6 +162,9 @@ export const useCanvasStore = create<CanvasState>((set) => ({
   markUnsaved: () => set({ hasUnsavedChanges: true }),
 
   notifyScanDeviceFound: () => set({ scanEventTs: Date.now() }),
+
+  hideIp: false,
+  toggleHideIp: () => set((s) => ({ hideIp: !s.hideIp })),
 
   loadCanvas: (nodes, edges) => {
     // React Flow requires parents before children in the array

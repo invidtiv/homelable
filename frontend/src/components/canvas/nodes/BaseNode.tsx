@@ -6,6 +6,8 @@ import { resolveNodeColors } from '@/utils/nodeColors'
 import { resolveNodeIcon } from '@/utils/nodeIcons'
 import { useThemeStore } from '@/stores/themeStore'
 import { THEMES } from '@/utils/themes'
+import { useCanvasStore } from '@/stores/canvasStore'
+import { maskIp } from '@/utils/maskIp'
 
 interface BaseNodeProps extends NodeProps<Node<NodeData>> {
   icon: LucideIcon
@@ -13,6 +15,7 @@ interface BaseNodeProps extends NodeProps<Node<NodeData>> {
 
 export function BaseNode({ data, selected, icon: typeIcon }: BaseNodeProps) {
   const activeTheme = useThemeStore((s) => s.activeTheme)
+  const hideIp = useCanvasStore((s) => s.hideIp)
   const theme = THEMES[activeTheme]
 
   const resolvedIcon = resolveNodeIcon(typeIcon, data.custom_icon)
@@ -70,7 +73,7 @@ export function BaseNode({ data, selected, icon: typeIcon }: BaseNodeProps) {
             style={{ color: theme.colors.nodeSubtextColor }}
             title={data.ip}
           >
-            {data.ip}
+            {hideIp ? maskIp(data.ip) : data.ip}
           </div>
         )}
       </div>

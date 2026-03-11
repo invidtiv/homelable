@@ -1,5 +1,5 @@
 import { useState, useCallback, useEffect, useRef } from 'react'
-import { Plus, Save, ScanLine, ChevronLeft, ChevronRight, LayoutDashboard, Clock, EyeOff, Trash2, RefreshCw, Loader2, Square } from 'lucide-react'
+import { Plus, Save, ScanLine, ChevronLeft, ChevronRight, LayoutDashboard, Clock, EyeOff, Trash2, RefreshCw, Loader2, Square, Eye } from 'lucide-react'
 import { Logo } from '@/components/ui/Logo'
 import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip'
 import { useCanvasStore } from '@/stores/canvasStore'
@@ -40,7 +40,7 @@ interface SidebarProps {
 export function Sidebar({ onAddNode, onAddGroupRect, onScan, onSave, onNodeApproved }: SidebarProps) {
   const [collapsed, setCollapsed] = useState(false)
   const [activeView, setActiveView] = useState<SidebarView>('canvas')
-  const { nodes, hasUnsavedChanges } = useCanvasStore()
+  const { nodes, hasUnsavedChanges, hideIp, toggleHideIp } = useCanvasStore()
 
   const networkNodes = nodes.filter((n) => n.data.type !== 'groupRect')
   const onlineCount = networkNodes.filter((n) => n.data.status === 'online').length
@@ -126,6 +126,13 @@ export function Sidebar({ onAddNode, onAddGroupRect, onScan, onSave, onNodeAppro
         <SidebarItem icon={Plus} label="Add Node" collapsed={collapsed} onClick={onAddNode} />
         <SidebarItem icon={Square} label="Add Rectangle" collapsed={collapsed} onClick={onAddGroupRect} />
         {!STANDALONE && <SidebarItem icon={ScanLine} label="Scan Network" collapsed={collapsed} onClick={handleScan} />}
+        <SidebarItem
+          icon={hideIp ? EyeOff : Eye}
+          label={hideIp ? 'Show IPs' : 'Hide IPs'}
+          collapsed={collapsed}
+          onClick={toggleHideIp}
+          active={hideIp}
+        />
         <SidebarItem
           icon={Save}
           label="Save Canvas"
