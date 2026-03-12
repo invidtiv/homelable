@@ -40,6 +40,8 @@ async def init_db() -> None:
             await conn.exec_driver_sql("ALTER TABLE edges ADD COLUMN source_handle TEXT")
         with suppress(Exception):
             await conn.exec_driver_sql("ALTER TABLE edges ADD COLUMN target_handle TEXT")
+        with suppress(Exception):
+            await conn.exec_driver_sql("ALTER TABLE edges ADD COLUMN animated BOOLEAN NOT NULL DEFAULT 0")
 
 
 async def get_db() -> AsyncGenerator[AsyncSession, None]:

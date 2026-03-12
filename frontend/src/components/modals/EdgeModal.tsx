@@ -25,6 +25,7 @@ export function EdgeModal({ open, onClose, onSubmit, onDelete, initial, title = 
   const [vlanId, setVlanId] = useState(initial?.vlan_id?.toString() ?? '')
   const [customColor, setCustomColor] = useState<string | undefined>(initial?.custom_color)
   const [pathStyle, setPathStyle] = useState<EdgePathStyle>(initial?.path_style ?? 'bezier')
+  const [animated, setAnimated] = useState(initial?.animated ?? false)
 
   const effectiveColor = customColor ?? EDGE_DEFAULT_COLORS[type]
 
@@ -36,6 +37,7 @@ export function EdgeModal({ open, onClose, onSubmit, onDelete, initial, title = 
       vlan_id: type === 'vlan' && vlanId ? parseInt(vlanId) : undefined,
       custom_color: customColor,
       path_style: pathStyle,
+      animated: animated || undefined,
     })
     onClose()
   }
@@ -111,6 +113,22 @@ export function EdgeModal({ open, onClose, onSubmit, onDelete, initial, title = 
                 </button>
               ))}
             </div>
+          </div>
+
+          <div className="flex items-center justify-between">
+            <Label className="text-xs text-muted-foreground">Flow Animation</Label>
+            <button
+              type="button"
+              onClick={() => setAnimated((a) => !a)}
+              className="relative w-9 h-5 rounded-full transition-colors focus:outline-none shrink-0"
+              style={{ background: animated ? '#00d4ff' : '#30363d' }}
+              aria-pressed={animated}
+            >
+              <span
+                className="absolute top-0.5 left-0.5 w-4 h-4 rounded-full bg-white shadow transition-transform"
+                style={{ transform: animated ? 'translateX(16px)' : 'translateX(0)' }}
+              />
+            </button>
           </div>
 
           <div className="flex flex-col gap-1.5">

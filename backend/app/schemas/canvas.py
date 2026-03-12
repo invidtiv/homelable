@@ -37,6 +37,7 @@ class EdgeSave(BaseModel):
     speed: str | None = None
     custom_color: str | None = None
     path_style: str | None = None
+    animated: bool = False
     source_handle: str | None = None
     target_handle: str | None = None
 

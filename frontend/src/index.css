@@ -115,3 +115,13 @@
 .font-mono {
     font-family: 'JetBrains Mono', monospace;
 }
+
+/* Edge flow animation — dot traveling from source to target */
+@keyframes flow-dot {
+    from { stroke-dashoffset: 0; }
+    to   { stroke-dashoffset: -10000; }
+}
+.edge-flow-dot {
+    animation: flow-dot 2.5s linear infinite;
+    pointer-events: none;
+}

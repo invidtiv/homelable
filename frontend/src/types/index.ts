@@ -81,6 +81,7 @@ export interface EdgeData extends Record<string, unknown> {
   speed?: string
   custom_color?: string
   path_style?: EdgePathStyle
+  animated?: boolean
 }
 
 export const NODE_TYPE_LABELS: Record<NodeType, string> = {

@@ -46,9 +46,32 @@ export function HomelableEdge({ id, sourceX, sourceY, targetX, targetY, sourcePo
     ...(selected ? { stroke: theme.colors.edgeSelectedColor, filter: `drop-shadow(0 0 4px ${theme.colors.edgeSelectedColor}88)` } : {}),
   }
 
+  // Animated dot: slightly brighter + thicker than the base edge, travels source→target
+  const dotColor = customColor ?? (edgeType === 'vlan' ? getVlanColor(data?.vlan_id as number | undefined) : edgeColors[edgeType as keyof typeof edgeColors] as string)
+  const dotWidth = (style.strokeWidth as number ?? 2) + 1.5
+
   return (
     <>
       <BaseEdge id={id} path={edgePath} style={style} />
+      {data?.animated && (
+        <path
+          d={edgePath}
+          fill="none"
+          stroke={dotColor}
+          strokeWidth={dotWidth}
+          strokeDasharray="8 10000"
+          strokeLinecap="round"
+          style={{ pointerEvents: 'none' }}
+        >
+          <animate
+            attributeName="stroke-dashoffset"
+            from="0"
+            to="-10000"
+            dur="2.5s"
+            repeatCount="indefinite"
+          />
+        </path>
+      )}
       {data?.label && (
         <EdgeLabelRenderer>
           <div

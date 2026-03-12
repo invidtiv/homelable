@@ -111,6 +111,7 @@ export default function App() {
         speed: e.data?.speed ?? null,
         custom_color: e.data?.custom_color ?? null,
         path_style: e.data?.path_style ?? null,
+        animated: e.data?.animated ?? false,
         // Normalize stub handle IDs: "top-t" / "bottom-t" are invisible target stubs;
         // map them back to their canonical source handle ID so reload works correctly.
         source_handle: e.sourceHandle === 'top-t' ? 'top' : e.sourceHandle === 'bottom-t' ? 'bottom' : (e.sourceHandle ?? null),
