@@ -24,11 +24,12 @@ def register_tools(server: Server):
                 "type": "object",
                 "required": ["id"],
                 "properties": {
-                    "id":       {"type": "string"},
-                    "label":    {"type": "string"},
-                    "ip":       {"type": "string"},
-                    "hostname": {"type": "string"},
-                    "status":   {"type": "string"},
+                    "id":        {"type": "string"},
+                    "label":     {"type": "string"},
+                    "ip":        {"type": "string"},
+                    "hostname":  {"type": "string"},
+                    "status":    {"type": "string"},
+                    "parent_id": {"type": "string", "description": "ID of the parent node (e.g. Proxmox host for a VM/LXC). Pass null to detach."},
                 },
             }),
             Tool(name="delete_node", description="Delete a node from the canvas", inputSchema={

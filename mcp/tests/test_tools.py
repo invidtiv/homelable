@@ -27,6 +27,12 @@ async def test_update_node(mock_backend):
 
 
 @pytest.mark.anyio
+async def test_update_node_parent_id(mock_backend):
+    await _dispatch("update_node", {"id": "42", "parent_id": "proxmox-1"})
+    mock_backend.patch.assert_called_once_with("/api/v1/nodes/42", {"parent_id": "proxmox-1"})
+
+
+@pytest.mark.anyio
 async def test_delete_node(mock_backend):
     await _dispatch("delete_node", {"id": "42"})
     mock_backend.delete.assert_called_once_with("/api/v1/nodes/42")

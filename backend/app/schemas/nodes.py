@@ -42,6 +42,7 @@ class NodeUpdate(BaseModel):
     notes: str | None = None
     pos_x: float | None = None
     pos_y: float | None = None
+    parent_id: str | None = None
     container_mode: bool | None = None
     custom_colors: dict[str, Any] | None = None
     custom_icon: str | None = None

@@ -102,6 +102,16 @@ async def test_update_node_container_mode(client: AsyncClient, headers: dict):
     assert res.json()["container_mode"] is True
 
 
+async def test_update_node_parent_id(client: AsyncClient, headers: dict):
+    parent = await client.post("/api/v1/nodes", json={"type": "proxmox", "label": "PVE", "status": "unknown"}, headers=headers)
+    parent_id = parent.json()["id"]
+    child = await client.post("/api/v1/nodes", json={"type": "lxc", "label": "Child", "status": "unknown"}, headers=headers)
+    child_id = child.json()["id"]
+    res = await client.patch(f"/api/v1/nodes/{child_id}", json={"parent_id": parent_id}, headers=headers)
+    assert res.status_code == 200
+    assert res.json()["parent_id"] == parent_id
+
+
 async def test_create_node_requires_auth(client: AsyncClient):
     res = await client.post("/api/v1/nodes", json={"type": "server", "label": "N", "status": "unknown"})
     assert res.status_code == 401
