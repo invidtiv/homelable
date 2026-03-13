@@ -2,6 +2,7 @@ import { useEffect, useCallback, useRef, useState } from 'react'
 import { ReactFlowProvider, type Connection, type Edge } from '@xyflow/react'
 import { type Node } from '@xyflow/react'
 import { applyDagreLayout } from '@/utils/layout'
+import { generateMarkdownTable } from '@/utils/exportMarkdown'
 import { exportToPng } from '@/utils/export'
 import { TooltipProvider } from '@/components/ui/tooltip'
 import { Toaster } from '@/components/ui/sonner'
@@ -355,6 +356,13 @@ export default function App() {
     toast.success('Canvas auto-arranged')
   }, [nodes, edges, loadCanvas])
 
+  const handleExportMd = useCallback(async () => {
+    const md = generateMarkdownTable(nodes)
+    if (!md) { toast.error('No nodes to export'); return }
+    await navigator.clipboard.writeText(md)
+    toast.success('Markdown table copied to clipboard')
+  }, [nodes])
+
   const handleExport = useCallback(async () => {
     const el = canvasRef.current?.querySelector<HTMLElement>('.react-flow')
     if (!el) { toast.error('Canvas not ready'); return }
@@ -432,6 +440,7 @@ export default function App() {
               onUndo={undo}
               onRedo={redo}
               onShortcuts={() => setShortcutsOpen(true)}
+              onExportMd={handleExportMd}
             />
             <div className="flex flex-1 min-h-0">
               <div ref={canvasRef} className="flex-1 min-w-0 h-full">

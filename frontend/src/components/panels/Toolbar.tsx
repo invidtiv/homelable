@@ -1,4 +1,4 @@
-import { Save, LayoutDashboard, Download, Palette, Undo2, Redo2, HelpCircle } from 'lucide-react'
+import { Save, LayoutDashboard, Download, Palette, Undo2, Redo2, HelpCircle, Table2 } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import { Logo } from '@/components/ui/Logo'
 import { useCanvasStore } from '@/stores/canvasStore'
@@ -11,9 +11,10 @@ interface ToolbarProps {
   onUndo: () => void
   onRedo: () => void
   onShortcuts: () => void
+  onExportMd: () => void
 }
 
-export function Toolbar({ onSave, onAutoLayout, onExport, onChangeStyle, onUndo, onRedo, onShortcuts }: ToolbarProps) {
+export function Toolbar({ onSave, onAutoLayout, onExport, onChangeStyle, onUndo, onRedo, onShortcuts, onExportMd }: ToolbarProps) {
   const { hasUnsavedChanges, past, future } = useCanvasStore()
 
   return (
@@ -45,8 +46,11 @@ export function Toolbar({ onSave, onAutoLayout, onExport, onChangeStyle, onUndo,
       <Button size="sm" variant="ghost" className="gap-1.5 text-muted-foreground hover:text-foreground" onClick={onChangeStyle}>
         <Palette size={14} /> Style
       </Button>
-      <Button size="sm" variant="ghost" className="gap-1.5 text-muted-foreground hover:text-foreground" onClick={onExport}>
+      <Button size="sm" variant="ghost" className="gap-1.5 text-muted-foreground hover:text-foreground" onClick={onExport} title="Export as PNG">
         <Download size={14} /> Export
+      </Button>
+      <Button size="sm" variant="ghost" className="gap-1.5 text-muted-foreground hover:text-foreground" onClick={onExportMd} title="Copy inventory as Markdown table">
+        <Table2 size={14} /> MD
       </Button>
       <Button size="sm" variant="ghost" className="gap-1.5 text-muted-foreground hover:text-foreground" onClick={onShortcuts} title="Keyboard shortcuts (?)">
         <HelpCircle size={14} />
