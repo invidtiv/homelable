@@ -11,11 +11,23 @@ _connections: list[WebSocket] = []
 
 
 @router.websocket("/ws/status")
-async def ws_status(websocket: WebSocket, token: str | None = None) -> None:
-    if not token or not decode_token(token):
-        await websocket.close(code=1008)  # Policy Violation
-        return
+async def ws_status(websocket: WebSocket) -> None:
+    # Accept first so we can send a close frame with a reason code
     await websocket.accept()
+    try:
+        # Expect the first message to be a JSON auth payload: {"token": "<jwt>"}
+        raw = await websocket.receive_text()
+        try:
+            payload = json.loads(raw)
+            token = payload.get("token", "")
+        except (json.JSONDecodeError, AttributeError):
+            token = ""
+        if not token or not decode_token(token):
+            await websocket.close(code=1008)  # Policy Violation
+            return
+    except WebSocketDisconnect:
+        return
+
     _connections.append(websocket)
     try:
         while True:

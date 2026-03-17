@@ -22,24 +22,33 @@ def _make_token() -> str:
 # ---------------------------------------------------------------------------
 
 def test_websocket_rejected_without_token():
-    """Connection with no token must be closed before being accepted."""
-    with TestClient(app) as client, pytest.raises(WebSocketDisconnect), client.websocket_connect("/api/v1/status/ws/status"):
-        pass
+    """Connection that sends no token field must be closed with 1008."""
+    with TestClient(app) as client, pytest.raises(WebSocketDisconnect), client.websocket_connect("/api/v1/status/ws/status") as ws:
+        ws.send_text(json.dumps({}))  # missing token field
+        ws.receive_text()  # triggers WebSocketDisconnect from server close
 
 
 def test_websocket_rejected_with_invalid_token():
-    """Connection with a garbage token must be closed."""
-    with TestClient(app) as client, pytest.raises(WebSocketDisconnect), client.websocket_connect("/api/v1/status/ws/status?token=not-a-valid-jwt"):
-        pass
+    """Connection that sends a garbage token must be closed."""
+    with TestClient(app) as client, pytest.raises(WebSocketDisconnect), client.websocket_connect("/api/v1/status/ws/status") as ws:
+        ws.send_text(json.dumps({"token": "not-a-valid-jwt"}))
+        ws.receive_text()
+
+
+def test_websocket_rejected_with_malformed_json():
+    """Connection that sends non-JSON as auth must be closed."""
+    with TestClient(app) as client, pytest.raises(WebSocketDisconnect), client.websocket_connect("/api/v1/status/ws/status") as ws:
+        ws.send_text("not-json")
+        ws.receive_text()
 
 
 def test_websocket_accepted_with_valid_token():
-    """Connection with a valid JWT must be accepted and kept open."""
+    """Connection that sends a valid JWT as first message must be accepted."""
     token = _make_token()
-    with TestClient(app) as client, client.websocket_connect(f"/api/v1/status/ws/status?token={token}") as ws:
-        # Connection is open — we can send a ping and it should not raise
+    with TestClient(app) as client, client.websocket_connect("/api/v1/status/ws/status") as ws:
+        ws.send_text(json.dumps({"token": token}))
+        # Connection is open — subsequent messages should not raise
         ws.send_text("ping")
-            # Server keeps the connection open (no disconnect expected)
 
 
 # ---------------------------------------------------------------------------

@@ -24,10 +24,15 @@ export function useStatusPolling() {
 
     const protocol = window.location.protocol === 'https:' ? 'wss' : 'ws'
     const host = window.location.host  // includes port when non-standard
-    const url = `${protocol}://${host}/api/v1/status/ws/status?token=${encodeURIComponent(token)}`
+    const url = `${protocol}://${host}/api/v1/status/ws/status`
 
     const ws = new WebSocket(url)
     wsRef.current = ws
+
+    // Send token as first message (not in URL to avoid log/history exposure)
+    ws.onopen = () => {
+      ws.send(JSON.stringify({ token }))
+    }
 
     ws.onmessage = (event) => {
       try {
