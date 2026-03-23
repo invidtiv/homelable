@@ -5,6 +5,7 @@ import { applyDagreLayout } from '@/utils/layout'
 import { generateUUID } from '@/utils/uuid'
 import { generateMarkdownTable } from '@/utils/exportMarkdown'
 import { exportToPng } from '@/utils/export'
+import { exportCanvasToYaml, downloadYaml } from '@/utils/exportYaml'
 import { TooltipProvider } from '@/components/ui/tooltip'
 import { Toaster } from '@/components/ui/sonner'
 import { toast } from 'sonner'
@@ -371,6 +372,13 @@ export default function App() {
     toast.success('Markdown table copied to clipboard')
   }, [nodes])
 
+  const handleExportYaml = useCallback(() => {
+    if (nodes.length === 0) { toast.error('No nodes to export'); return }
+    const content = exportCanvasToYaml(nodes, edges)
+    downloadYaml(content)
+    toast.success('Canvas exported as YAML')
+  }, [nodes, edges])
+
   const handleExport = useCallback(async () => {
     const el = canvasRef.current?.querySelector<HTMLElement>('.react-flow')
     if (!el) { toast.error('Canvas not ready'); return }
@@ -449,6 +457,7 @@ export default function App() {
               onRedo={redo}
               onShortcuts={() => setShortcutsOpen(true)}
               onExportMd={handleExportMd}
+              onExportYaml={handleExportYaml}
             />
             <div className="flex flex-1 min-h-0">
               <div ref={canvasRef} className="flex-1 min-w-0 h-full">
