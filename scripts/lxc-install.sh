@@ -122,11 +122,8 @@ sed \
 
 ln -sf /etc/nginx/sites-available/homelable /etc/nginx/sites-enabled/homelable
 rm -f /etc/nginx/sites-enabled/default
-if nginx -t; then
-  systemctl reload nginx
-else
-  systemctl start nginx
-fi
+nginx -t
+systemctl reload nginx || systemctl start nginx
 
 # ── Enable & start ────────────────────────────────────────────────────────────
 systemctl daemon-reload
