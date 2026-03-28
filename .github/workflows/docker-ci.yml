@@ -23,24 +23,25 @@ jobs:
       # ── Write a minimal .env consumed by docker-compose.yml ───────────────
       - name: Write .env
         run: |
-          cat > .env <<'EOF'
-          SECRET_KEY=ci-only-secret-key-not-for-production
-          SQLITE_PATH=/app/data/homelab.db
-          CORS_ORIGINS=["http://localhost:3000"]
-          SCANNER_RANGES=["127.0.0.1/32"]
-          STATUS_CHECKER_INTERVAL=300
-          MCP_API_KEY=ci-mcp-key
-          MCP_SERVICE_KEY=ci-svc-key
-          AUTH_USERNAME=admin
-          EOF
-          echo "AUTH_PASSWORD_HASH=${{ steps.pwhash.outputs.hash }}" >> .env
+          {
+            echo "SECRET_KEY=ci-only-secret-key-not-for-production"
+            echo "SQLITE_PATH=/app/data/homelab.db"
+            echo 'CORS_ORIGINS=["http://localhost:3000"]'
+            echo 'SCANNER_RANGES=["127.0.0.1/32"]'
+            echo "STATUS_CHECKER_INTERVAL=300"
+            echo "MCP_API_KEY=ci-mcp-key"
+            echo "MCP_SERVICE_KEY=ci-svc-key"
+            echo "AUTH_USERNAME=admin"
+            echo "AUTH_PASSWORD_HASH=${{ steps.pwhash.outputs.hash }}"
+          } > .env
 
       # ── Build + start backend and frontend (skip mcp) ─────────────────────
+      # docker-compose.ci.yml adds ports: 8000:8000 so the runner can reach the backend
       - name: Build images
-        run: docker compose build backend frontend
+        run: docker compose -f docker-compose.yml -f docker-compose.ci.yml build backend frontend
 
       - name: Start stack
-        run: docker compose up -d backend frontend
+        run: docker compose -f docker-compose.yml -f docker-compose.ci.yml up -d backend frontend
 
       # ── Wait for backend to be healthy (max 60 s) ─────────────────────────
       - name: Wait for backend health
@@ -83,8 +84,8 @@ jobs:
       # ── Teardown ───────────────────────────────────────────────────────────
       - name: Dump logs on failure
         if: failure()
-        run: docker compose logs
+        run: docker compose -f docker-compose.yml -f docker-compose.ci.yml logs
 
       - name: Stop stack
         if: always()
-        run: docker compose down -v
+        run: docker compose -f docker-compose.yml -f docker-compose.ci.yml down -v

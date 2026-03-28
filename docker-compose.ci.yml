@@ -1,0 +1,6 @@
+# CI override — exposes backend port 8000 so smoke/integration tests can reach it.
+# Usage: docker compose -f docker-compose.yml -f docker-compose.ci.yml up -d backend frontend
+services:
+  backend:
+    ports:
+      - "8000:8000"
