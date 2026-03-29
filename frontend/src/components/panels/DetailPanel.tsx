@@ -29,6 +29,7 @@ export function DetailPanel({ onEdit }: DetailPanelProps) {
   const editingIndex = editingFor?.nodeId === node.id ? editingFor.index : null
 
   const { data } = node
+  const services = data.services ?? []
   const statusColor = STATUS_COLORS[data.status]
   const host = data.ip ?? data.hostname
 
@@ -46,19 +47,19 @@ export function DetailPanel({ onEdit }: DetailPanelProps) {
       protocol: newSvc.protocol,
       service_name: newSvc.service_name.trim(),
     }
-    updateNode(node.id, { services: [...(data.services ?? []), svc] })
+    updateNode(node.id, { services: [...services, svc] })
     setNewSvc(EMPTY_FORM)
     setAddingForNode(null)
   }
 
   const handleRemoveService = (index: number) => {
-    const updated = (data.services ?? []).filter((_, i) => i !== index)
+    const updated = services.filter((_, i) => i !== index)
     updateNode(node.id, { services: updated })
     if (editingIndex === index) setEditingFor(null)
   }
 
   const handleStartEdit = (index: number) => {
-    const svc = (data.services ?? [])[index]
+    const svc = services[index]
     if (!svc) return
     setEditSvc({ port: String(svc.port), protocol: svc.protocol, service_name: svc.service_name })
     setEditingFor({ nodeId: node.id, index })
@@ -69,7 +70,7 @@ export function DetailPanel({ onEdit }: DetailPanelProps) {
     if (editingIndex === null) return
     const port = parseInt(editSvc.port, 10)
     if (!editSvc.service_name.trim() || isNaN(port) || port < 1 || port > 65535) return
-    const updated = (data.services ?? []).map((svc, i) =>
+    const updated = services.map((svc, i) =>
       i === editingIndex
         ? { ...svc, port, protocol: editSvc.protocol, service_name: editSvc.service_name.trim() }
         : svc
@@ -84,6 +85,7 @@ export function DetailPanel({ onEdit }: DetailPanelProps) {
       <div className="flex items-center justify-between px-4 py-3 border-b border-border">
         <span className="font-semibold text-sm text-foreground truncate">{data.label}</span>
         <button
+          aria-label="Close panel"
           onClick={() => setSelectedNode(null)}
           className="text-muted-foreground hover:text-foreground transition-colors"
         >
@@ -142,7 +144,7 @@ export function DetailPanel({ onEdit }: DetailPanelProps) {
       <div className="px-4 py-3 border-t border-border">
         <div className="flex items-center justify-between mb-2">
           <span className="text-xs text-muted-foreground">
-            Services{(data.services ?? []).length > 0 ? ` (${data.services.length})` : ''}
+            Services{services.length > 0 ? ` (${services.length})` : ''}
           </span>
           <button
             onClick={() => { setAddingForNode((v) => v === node.id ? null : node.id); setEditingFor(null) }}
@@ -164,9 +166,9 @@ export function DetailPanel({ onEdit }: DetailPanelProps) {
           />
         )}
 
-        {(data.services ?? []).length > 0 && (
+        {services.length > 0 && (
           <div className="flex flex-col gap-1.5">
-            {(data.services ?? []).map((svc, i) =>
+            {services.map((svc, i) =>
               editingIndex === i ? (
                 <ServiceForm
                   key={`edit-${i}`}
@@ -190,7 +192,7 @@ export function DetailPanel({ onEdit }: DetailPanelProps) {
           </div>
         )}
 
-        {(data.services ?? []).length === 0 && !addingService && (
+        {services.length === 0 && !addingService && (
           <p className="text-[10px] text-muted-foreground/50">No services — click Add to register one.</p>
         )}
       </div>

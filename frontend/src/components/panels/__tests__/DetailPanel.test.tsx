@@ -116,6 +116,116 @@ describe('DetailPanel', () => {
     })
   })
 
+  describe('Panel actions', () => {
+    it('calls setSelectedNode(null) when close button is clicked', () => {
+      const setSelectedNode = vi.fn()
+      vi.mocked(canvasStore.useCanvasStore).mockReturnValue({
+        nodes: [makeNode({})],
+        selectedNodeId: 'n1',
+        setSelectedNode,
+        deleteNode: vi.fn(),
+        updateNode: vi.fn(),
+      } as unknown as ReturnType<typeof canvasStore.useCanvasStore>)
+      render(<DetailPanel onEdit={vi.fn()} />)
+      fireEvent.click(screen.getByLabelText('Close panel'))
+      expect(setSelectedNode).toHaveBeenCalledWith(null)
+    })
+
+    it('calls onEdit with node id when Edit button is clicked', () => {
+      setupStore({})
+      const onEdit = vi.fn()
+      render(<DetailPanel onEdit={onEdit} />)
+      fireEvent.click(screen.getByRole('button', { name: /edit/i }))
+      expect(onEdit).toHaveBeenCalledWith('n1')
+    })
+
+    it('calls deleteNode when delete confirmed', () => {
+      const deleteNode = vi.fn()
+      vi.mocked(canvasStore.useCanvasStore).mockReturnValue({
+        nodes: [makeNode({ label: 'My Server' })],
+        selectedNodeId: 'n1',
+        setSelectedNode: vi.fn(),
+        deleteNode,
+        updateNode: vi.fn(),
+      } as unknown as ReturnType<typeof canvasStore.useCanvasStore>)
+      vi.spyOn(window, 'confirm').mockReturnValue(true)
+      render(<DetailPanel onEdit={vi.fn()} />)
+      fireEvent.click(screen.getByLabelText('Delete node'))
+      expect(deleteNode).toHaveBeenCalledWith('n1')
+    })
+
+    it('does not call deleteNode when delete is cancelled', () => {
+      const deleteNode = vi.fn()
+      vi.mocked(canvasStore.useCanvasStore).mockReturnValue({
+        nodes: [makeNode({})],
+        selectedNodeId: 'n1',
+        setSelectedNode: vi.fn(),
+        deleteNode,
+        updateNode: vi.fn(),
+      } as unknown as ReturnType<typeof canvasStore.useCanvasStore>)
+      vi.spyOn(window, 'confirm').mockReturnValue(false)
+      render(<DetailPanel onEdit={vi.fn()} />)
+      fireEvent.click(screen.getByLabelText('Delete node'))
+      expect(deleteNode).not.toHaveBeenCalled()
+    })
+  })
+
+  describe('Services — add/remove', () => {
+    it('shows add form when Add is clicked', () => {
+      setupStore({})
+      render(<DetailPanel onEdit={vi.fn()} />)
+      fireEvent.click(screen.getByText('Add'))
+      expect(screen.getByPlaceholderText('Service name')).toBeDefined()
+    })
+
+    it('calls updateNode with new service on Add confirm', () => {
+      const updateNode = vi.fn()
+      vi.mocked(canvasStore.useCanvasStore).mockReturnValue({
+        nodes: [makeNode({})],
+        selectedNodeId: 'n1',
+        setSelectedNode: vi.fn(),
+        deleteNode: vi.fn(),
+        updateNode,
+      } as unknown as ReturnType<typeof canvasStore.useCanvasStore>)
+      render(<DetailPanel onEdit={vi.fn()} />)
+      fireEvent.click(screen.getByText('Add'))
+      fireEvent.change(screen.getByPlaceholderText('Service name'), { target: { value: 'nginx' } })
+      fireEvent.change(screen.getByPlaceholderText('Port'), { target: { value: '80' } })
+      // Two "Add" buttons exist: the header toggle and the form confirm — pick the form's
+      const addButtons = screen.getAllByRole('button', { name: 'Add' })
+      fireEvent.click(addButtons[addButtons.length - 1])
+      expect(updateNode).toHaveBeenCalledOnce()
+      expect(updateNode.mock.calls[0][1].services[0]).toMatchObject({ service_name: 'nginx', port: 80, protocol: 'tcp' })
+    })
+
+    it('calls updateNode without the removed service when X is clicked', () => {
+      const updateNode = vi.fn()
+      const svc = { port: 80, protocol: 'tcp' as const, service_name: 'nginx' }
+      vi.mocked(canvasStore.useCanvasStore).mockReturnValue({
+        nodes: [makeNode({ services: [svc] })],
+        selectedNodeId: 'n1',
+        setSelectedNode: vi.fn(),
+        deleteNode: vi.fn(),
+        updateNode,
+      } as unknown as ReturnType<typeof canvasStore.useCanvasStore>)
+      render(<DetailPanel onEdit={vi.fn()} />)
+      fireEvent.click(screen.getByTitle('Remove service'))
+      expect(updateNode).toHaveBeenCalledOnce()
+      expect(updateNode.mock.calls[0][1].services).toHaveLength(0)
+    })
+
+    it('does not crash when data.services is undefined', () => {
+      vi.mocked(canvasStore.useCanvasStore).mockReturnValue({
+        nodes: [makeNode({ services: undefined as unknown as [] })],
+        selectedNodeId: 'n1',
+        setSelectedNode: vi.fn(),
+        deleteNode: vi.fn(),
+        updateNode: vi.fn(),
+      } as unknown as ReturnType<typeof canvasStore.useCanvasStore>)
+      expect(() => render(<DetailPanel onEdit={vi.fn()} />)).not.toThrow()
+    })
+  })
+
   describe('Services — edit', () => {
     const svc = { port: 80, protocol: 'tcp' as const, service_name: 'nginx' }
 
