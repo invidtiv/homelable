@@ -18,12 +18,15 @@ export function DetailPanel({ onEdit }: DetailPanelProps) {
   const { nodes, selectedNodeId, setSelectedNode, deleteNode, updateNode } = useCanvasStore()
   const node = nodes.find((n) => n.id === selectedNodeId)
 
-  const [addingService, setAddingService] = useState(false)
+  const [addingForNode, setAddingForNode] = useState<string | null>(null)
   const [newSvc, setNewSvc] = useState<SvcForm>(EMPTY_FORM)
-  const [editingIndex, setEditingIndex] = useState<number | null>(null)
+  const [editingFor, setEditingFor] = useState<{ nodeId: string; index: number } | null>(null)
   const [editSvc, setEditSvc] = useState<SvcForm>(EMPTY_FORM)
 
   if (!node || node.data.type === 'groupRect') return null
+
+  const addingService = addingForNode === node.id
+  const editingIndex = editingFor?.nodeId === node.id ? editingFor.index : null
 
   const { data } = node
   const statusColor = STATUS_COLORS[data.status]
@@ -45,33 +48,34 @@ export function DetailPanel({ onEdit }: DetailPanelProps) {
     }
     updateNode(node.id, { services: [...(data.services ?? []), svc] })
     setNewSvc(EMPTY_FORM)
-    setAddingService(false)
+    setAddingForNode(null)
   }
 
   const handleRemoveService = (index: number) => {
-    const updated = data.services.filter((_, i) => i !== index)
+    const updated = (data.services ?? []).filter((_, i) => i !== index)
     updateNode(node.id, { services: updated })
-    if (editingIndex === index) setEditingIndex(null)
+    if (editingIndex === index) setEditingFor(null)
   }
 
   const handleStartEdit = (index: number) => {
-    const svc = data.services[index]
+    const svc = (data.services ?? [])[index]
+    if (!svc) return
     setEditSvc({ port: String(svc.port), protocol: svc.protocol, service_name: svc.service_name })
-    setEditingIndex(index)
-    setAddingService(false)
+    setEditingFor({ nodeId: node.id, index })
+    setAddingForNode(null)
   }
 
   const handleSaveEdit = () => {
     if (editingIndex === null) return
     const port = parseInt(editSvc.port, 10)
     if (!editSvc.service_name.trim() || isNaN(port) || port < 1 || port > 65535) return
-    const updated = data.services.map((svc, i) =>
+    const updated = (data.services ?? []).map((svc, i) =>
       i === editingIndex
         ? { ...svc, port, protocol: editSvc.protocol, service_name: editSvc.service_name.trim() }
         : svc
     )
     updateNode(node.id, { services: updated })
-    setEditingIndex(null)
+    setEditingFor(null)
   }
 
   return (
@@ -141,7 +145,7 @@ export function DetailPanel({ onEdit }: DetailPanelProps) {
             Services{data.services.length > 0 ? ` (${data.services.length})` : ''}
           </span>
           <button
-            onClick={() => { setAddingService((v) => !v); setEditingIndex(null) }}
+            onClick={() => { setAddingForNode((v) => v === node.id ? null : node.id); setEditingFor(null) }}
             className="flex items-center gap-1 text-[10px] text-[#00d4ff] hover:text-[#00d4ff]/80 transition-colors"
           >
             <Plus size={10} /> Add
@@ -154,7 +158,7 @@ export function DetailPanel({ onEdit }: DetailPanelProps) {
             form={newSvc}
             onChange={setNewSvc}
             onConfirm={handleAddService}
-            onCancel={() => setAddingService(false)}
+            onCancel={() => setAddingForNode(null)}
             confirmLabel="Add"
             autoFocus
           />
@@ -169,7 +173,7 @@ export function DetailPanel({ onEdit }: DetailPanelProps) {
                   form={editSvc}
                   onChange={setEditSvc}
                   onConfirm={handleSaveEdit}
-                  onCancel={() => setEditingIndex(null)}
+                  onCancel={() => setEditingFor(null)}
                   confirmLabel="Save"
                   autoFocus
                 />
