@@ -47,6 +47,8 @@ async def _run_status_checks() -> None:
 
 def start_scheduler() -> None:
     global scheduler
+    if scheduler.running:
+        scheduler.shutdown(wait=False)
     scheduler = AsyncIOScheduler()
     scheduler.add_job(_run_status_checks, "interval", seconds=settings.status_checker_interval, id="status_checks")
     scheduler.start()
@@ -55,9 +57,13 @@ def start_scheduler() -> None:
 
 def reschedule_status_checks(interval_seconds: int) -> None:
     """Update the status check interval on the running scheduler."""
+    if not scheduler.running:
+        logger.warning("Scheduler not running, skipping reschedule")
+        return
     scheduler.reschedule_job("status_checks", trigger="interval", seconds=interval_seconds)
     logger.info("Status checks rescheduled to every %ds", interval_seconds)
 
 
 def stop_scheduler() -> None:
-    scheduler.shutdown(wait=False)
+    if scheduler.running:
+        scheduler.shutdown(wait=False)
