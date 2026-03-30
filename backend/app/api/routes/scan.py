@@ -8,7 +8,6 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.api.deps import get_current_user
 from app.core.config import settings
-from app.core.scheduler import reschedule_status_checks
 from app.db.database import AsyncSessionLocal, get_db
 from app.db.models import Node, PendingDevice, ScanRun
 from app.schemas.nodes import NodeCreate
@@ -111,7 +110,6 @@ async def update_scan_config(payload: ScanConfig, _: str = Depends(get_current_u
     try:
         settings.scanner_ranges = payload.ranges
         settings.save_overrides()
-        reschedule_status_checks(payload.interval_seconds)
         return payload
     except Exception as exc:
         raise HTTPException(status_code=500, detail=str(exc)) from exc

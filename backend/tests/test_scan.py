@@ -156,26 +156,6 @@ async def test_ignore_device(client: AsyncClient, headers, pending_device):
     assert hidden_res.json() == []
 
 
-# --- Scan config ---
-
-@pytest.mark.asyncio
-async def test_update_scan_config_reschedules_interval(client: AsyncClient, headers):
-    """Saving a new interval must reschedule the running APScheduler job immediately."""
-    with (
-        patch("app.api.routes.scan.settings") as mock_settings,
-        patch("app.api.routes.scan.reschedule_status_checks") as mock_reschedule,
-    ):
-        mock_settings.scanner_ranges = []
-        mock_settings.save_overrides = lambda: None
-        res = await client.post(
-            "/api/v1/scan/config",
-            json={"ranges": ["192.168.1.0/24"], "interval_seconds": 30},
-            headers=headers,
-        )
-    assert res.status_code == 200
-    mock_reschedule.assert_called_once_with(30)
-
-
 # --- Scan runs ---
 
 @pytest.mark.asyncio
