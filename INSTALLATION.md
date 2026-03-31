@@ -13,7 +13,12 @@ Open **http://localhost:3000** — login with `admin` / `admin`.
 >
 > Generate a new hash: `docker compose exec backend python -c "from passlib.context import CryptContext; print(CryptContext(schemes=['bcrypt']).hash('yourpassword'))"`
 >
-> ⚠️ Keep the single quotes around the hash value in `.env` — bcrypt hashes contain `$` characters that Docker Compose would otherwise misinterpret.
+> ⚠️ **bcrypt hashes contain `$` characters** — how to handle them depends on where you set the value:
+> - **`.env` file** (recommended): wrap the hash in single quotes → `AUTH_PASSWORD_HASH='$2b$12$...'`
+> - **`docker-compose.yml` `environment:` block**: escape every `$` as `$$` — use this command to generate a pre-escaped hash:
+>   ```bash
+>   docker compose exec backend python -c "from passlib.context import CryptContext; print(CryptContext(schemes=['bcrypt']).hash('yourpassword').replace('\$', '\$\$'))"
+>   ```
 
 ## Quick Start — Frontend only
 
