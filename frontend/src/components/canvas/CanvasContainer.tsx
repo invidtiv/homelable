@@ -1,14 +1,17 @@
-import { useCallback } from 'react'
+import { useCallback, useState } from 'react'
 import {
   ReactFlow,
   Background,
   Controls,
+  ControlButton,
   BackgroundVariant,
   ConnectionMode,
+  SelectionMode,
   type Node,
   type Edge,
   type Connection,
 } from '@xyflow/react'
+import { MousePointer2, Hand } from 'lucide-react'
 import '@xyflow/react/dist/style.css'
 import { useCanvasStore } from '@/stores/canvasStore'
 import { useThemeStore } from '@/stores/themeStore'
@@ -24,6 +27,7 @@ interface CanvasContainerProps {
 }
 
 export function CanvasContainer({ onConnect: onConnectProp, onEdgeDoubleClick, onNodeDragStart }: CanvasContainerProps) {
+  const [lassoMode, setLassoMode] = useState(true)
   const {
     nodes, edges,
     onNodesChange, onEdgesChange,
@@ -33,8 +37,12 @@ export function CanvasContainer({ onConnect: onConnectProp, onEdgeDoubleClick, o
   const activeTheme = useThemeStore((s) => s.activeTheme)
   const theme = THEMES[activeTheme]
 
-  const onNodeClick = useCallback((_: React.MouseEvent, node: Node<NodeData>) => {
-    setSelectedNode(node.id)
+  const onNodeClick = useCallback((e: React.MouseEvent, node: Node<NodeData>) => {
+    if (e.ctrlKey || e.metaKey) {
+      setSelectedNode(null)
+    } else {
+      setSelectedNode(node.id)
+    }
   }, [setSelectedNode])
 
   const onPaneClick = useCallback(() => {
@@ -61,6 +69,11 @@ export function CanvasContainer({ onConnect: onConnectProp, onEdgeDoubleClick, o
         edgeTypes={edgeTypes}
         deleteKeyCode={['Backspace', 'Delete']}
         onBeforeDelete={async () => { snapshotHistory(); return true }}
+        selectionOnDrag={lassoMode}
+        panOnDrag={lassoMode ? [1, 2] : true}
+        panActivationKeyCode="Space"
+        selectionMode={SelectionMode.Partial}
+        multiSelectionKeyCode={['Meta', 'Control']}
         snapToGrid
         snapGrid={[16, 16]}
         fitView
@@ -75,7 +88,14 @@ export function CanvasContainer({ onConnect: onConnectProp, onEdgeDoubleClick, o
           size={1}
           color={theme.colors.canvasDotColor}
         />
-        <Controls />
+        <Controls>
+          <ControlButton
+            onClick={() => setLassoMode((m) => !m)}
+            title={lassoMode ? 'Switch to pan mode (Space to pan)' : 'Switch to lasso mode'}
+          >
+            {lassoMode ? <MousePointer2 size={12} /> : <Hand size={12} />}
+          </ControlButton>
+        </Controls>
       </ReactFlow>
     </div>
   )

@@ -16,6 +16,7 @@ export type NodeType =
   | 'docker'
   | 'generic'
   | 'groupRect'
+  | 'group'
 
 export type TextPosition =
   | 'top-left'
@@ -76,6 +77,7 @@ export interface NodeData extends Record<string, unknown> {
     label_position?: 'inside' | 'outside'
     text_size?: number
     z_order?: number
+    show_border?: boolean
     width?: number
     height?: number
   }
@@ -112,6 +114,7 @@ export const NODE_TYPE_LABELS: Record<NodeType, string> = {
   docker: 'Docker Host',
   generic: 'Generic Device',
   groupRect: 'Group Rectangle',
+  group: 'Node Group',
 }
 
 export const STATUS_COLORS: Record<NodeStatus, string> = {

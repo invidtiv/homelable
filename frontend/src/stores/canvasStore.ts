@@ -19,6 +19,7 @@ interface CanvasState {
   edges: Edge<EdgeData>[]
   hasUnsavedChanges: boolean
   selectedNodeId: string | null
+  selectedNodeIds: string[]
   scanEventTs: number
 
   // History
@@ -46,6 +47,8 @@ interface CanvasState {
   setNodeZIndex: (id: string, zIndex: number) => void
   editingGroupRectId: string | null
   setEditingGroupRectId: (id: string | null) => void
+  createGroup: (nodeIds: string[], name: string) => void
+  ungroup: (groupId: string) => void
   markSaved: () => void
   markUnsaved: () => void
   loadCanvas: (nodes: Node<NodeData>[], edges: Edge<EdgeData>[]) => void
@@ -59,6 +62,7 @@ export const useCanvasStore = create<CanvasState>((set) => ({
   edges: [],
   hasUnsavedChanges: false,
   selectedNodeId: null,
+  selectedNodeIds: [],
   editingGroupRectId: null,
   hideIp: false,
   scanEventTs: 0,
@@ -125,10 +129,15 @@ export const useCanvasStore = create<CanvasState>((set) => ({
     }),
 
   onNodesChange: (changes) =>
-    set((state) => ({
-      nodes: applyNodeChanges(changes, state.nodes),
-      hasUnsavedChanges: state.hasUnsavedChanges || changes.some((c) => c.type !== 'select'),
-    })),
+    set((state) => {
+      const nodes = applyNodeChanges(changes, state.nodes)
+      const selectedNodeIds = nodes.filter((n) => n.selected).map((n) => n.id)
+      return {
+        nodes,
+        selectedNodeIds,
+        hasUnsavedChanges: state.hasUnsavedChanges || changes.some((c) => c.type !== 'select'),
+      }
+    }),
 
   onEdgesChange: (changes) =>
     set((state) => ({
@@ -156,7 +165,10 @@ export const useCanvasStore = create<CanvasState>((set) => ({
       }
     }),
 
-  setSelectedNode: (id) => set({ selectedNodeId: id }),
+  setSelectedNode: (id) => set((state) => ({
+    selectedNodeId: id,
+    selectedNodeIds: id ? state.selectedNodeIds : [],
+  })),
 
   addNode: (node) =>
     set((state) => {
@@ -243,6 +255,112 @@ export const useCanvasStore = create<CanvasState>((set) => ({
     })),
 
   setEditingGroupRectId: (id) => set({ editingGroupRectId: id }),
+
+  createGroup: (nodeIds, name) =>
+    set((state) => {
+      const PADDING_H = 24
+      const PADDING_TOP = 48
+      const PADDING_BOTTOM = 24
+      const targets = state.nodes.filter((n) => nodeIds.includes(n.id))
+      if (targets.length === 0) return state
+
+      // Bounding box in absolute coordinates
+      let minX = Infinity, minY = Infinity, maxX = -Infinity, maxY = -Infinity
+      for (const n of targets) {
+        const w = n.width ?? 200
+        const h = n.height ?? 80
+        minX = Math.min(minX, n.position.x)
+        minY = Math.min(minY, n.position.y)
+        maxX = Math.max(maxX, n.position.x + w)
+        maxY = Math.max(maxY, n.position.y + h)
+      }
+
+      const groupX = minX - PADDING_H
+      const groupY = minY - PADDING_TOP
+      const groupW = maxX - minX + PADDING_H * 2
+      const groupH = maxY - minY + PADDING_TOP + PADDING_BOTTOM
+
+      const groupId = generateUUID()
+      const groupNode: Node<NodeData> = {
+        id: groupId,
+        type: 'group',
+        position: { x: groupX, y: groupY },
+        width: groupW,
+        height: groupH,
+        data: {
+          label: name,
+          type: 'group',
+          status: 'unknown',
+          services: [],
+          custom_colors: { show_border: true },
+        },
+        selected: false,
+      }
+
+      // Convert children to relative positions and assign parentId
+      const updatedNodes = state.nodes.map((n) => {
+        if (!nodeIds.includes(n.id)) return n
+        return {
+          ...n,
+          parentId: groupId,
+          extent: 'parent' as const,
+          position: {
+            x: n.position.x - groupX,
+            y: n.position.y - groupY,
+          },
+          selected: false,
+          data: { ...n.data, parent_id: groupId },
+        }
+      })
+
+      // Group node must come before its children
+      const withoutTargets = updatedNodes.filter((n) => !nodeIds.includes(n.id))
+      const children = updatedNodes.filter((n) => nodeIds.includes(n.id))
+      const nodes = [...withoutTargets, groupNode, ...children]
+
+      return {
+        nodes,
+        selectedNodeIds: [],
+        selectedNodeId: null,
+        hasUnsavedChanges: true,
+        past: [...state.past.slice(-49), { nodes: state.nodes, edges: state.edges }],
+        future: [],
+      }
+    }),
+
+  ungroup: (groupId) =>
+    set((state) => {
+      const group = state.nodes.find((n) => n.id === groupId)
+      if (!group) return state
+
+      const groupAbsX = group.position.x
+      const groupAbsY = group.position.y
+
+      const nodes = state.nodes
+        .filter((n) => n.id !== groupId)
+        .map((n) => {
+          if (n.parentId !== groupId) return n
+          return {
+            ...n,
+            parentId: undefined,
+            extent: undefined,
+            position: {
+              x: n.position.x + groupAbsX,
+              y: n.position.y + groupAbsY,
+            },
+            data: { ...n.data, parent_id: undefined },
+          }
+        })
+
+      return {
+        nodes,
+        selectedNodeId: null,
+        selectedNodeIds: [],
+        hasUnsavedChanges: true,
+        past: [...state.past.slice(-49), { nodes: state.nodes, edges: state.edges }],
+        future: [],
+      }
+    }),
 
   markSaved: () => set({ hasUnsavedChanges: false }),
 

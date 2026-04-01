@@ -111,6 +111,15 @@
     background-color: var(--surface-card) !important;
 }
 
+/* Transparent wrapper for container node types */
+.react-flow__node-proxmox,
+.react-flow__node-group {
+    background: transparent !important;
+    border: none !important;
+    box-shadow: none !important;
+    padding: 0 !important;
+}
+
 /* Mono font utility */
 .font-mono {
     font-family: 'JetBrains Mono', monospace;

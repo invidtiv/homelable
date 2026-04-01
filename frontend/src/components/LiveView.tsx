@@ -71,8 +71,8 @@ function LiveViewCanvas() {
         const { nodes: apiNodes, edges: apiEdges } = res.data
         const proxmoxMap = new Map<string, boolean>(
           (apiNodes as ApiNode[])
-            .filter((n: ApiNode) => n.type === 'proxmox')
-            .map((n: ApiNode) => [n.id, n.container_mode !== false])
+            .filter((n: ApiNode) => n.type === 'proxmox' || n.type === 'group')
+            .map((n: ApiNode) => [n.id, n.type === 'group' ? true : n.container_mode !== false])
         )
         loadCanvas(
           (apiNodes as ApiNode[]).map((n) => deserializeApiNode(n, proxmoxMap)),

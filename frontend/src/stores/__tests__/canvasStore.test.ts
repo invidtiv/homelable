@@ -25,6 +25,7 @@ describe('canvasStore', () => {
       edges: [],
       hasUnsavedChanges: false,
       selectedNodeId: null,
+      selectedNodeIds: [],
       editingGroupRectId: null,
       past: [],
       future: [],
@@ -176,6 +177,178 @@ describe('canvasStore', () => {
     const child = useCanvasStore.getState().nodes.find((n) => n.id === 'child')
     expect(child?.parentId).toBe('parent')
     expect(child?.extent).toBe('parent')
+  })
+
+  // ── selectedNodeIds ───────────────────────────────────────────────────────
+
+  it('selectedNodeIds starts empty', () => {
+    expect(useCanvasStore.getState().selectedNodeIds).toEqual([])
+  })
+
+  it('onNodesChange syncs selectedNodeIds from select changes', () => {
+    useCanvasStore.getState().addNode(makeNode('n1'))
+    useCanvasStore.getState().addNode(makeNode('n2'))
+    useCanvasStore.getState().onNodesChange([
+      { type: 'select', id: 'n1', selected: true },
+      { type: 'select', id: 'n2', selected: true },
+    ])
+    expect(useCanvasStore.getState().selectedNodeIds).toEqual(expect.arrayContaining(['n1', 'n2']))
+    expect(useCanvasStore.getState().selectedNodeIds).toHaveLength(2)
+  })
+
+  it('setSelectedNode(null) resets selectedNodeIds to empty', () => {
+    useCanvasStore.setState({ selectedNodeIds: ['n1', 'n2'] })
+    useCanvasStore.getState().setSelectedNode(null)
+    expect(useCanvasStore.getState().selectedNodeIds).toEqual([])
+  })
+
+  it('setSelectedNode(id) preserves existing selectedNodeIds', () => {
+    useCanvasStore.setState({ selectedNodeIds: ['n1', 'n2'] })
+    useCanvasStore.getState().setSelectedNode('n1')
+    // does NOT wipe selectedNodeIds when setting a specific id
+    expect(useCanvasStore.getState().selectedNodeIds).toEqual(['n1', 'n2'])
+  })
+
+  // ── createGroup ───────────────────────────────────────────────────────────
+
+  it('createGroup creates a group node at the bounding box of selected nodes', () => {
+    // n1 at (100,100), n2 at (300,200); both default to 200x80
+    const n1 = { ...makeNode('n1'), position: { x: 100, y: 100 }, width: 200, height: 80 }
+    const n2 = { ...makeNode('n2'), position: { x: 300, y: 200 }, width: 200, height: 80 }
+    useCanvasStore.setState({ nodes: [n1, n2] })
+
+    useCanvasStore.getState().createGroup(['n1', 'n2'], 'My Group')
+
+    const { nodes } = useCanvasStore.getState()
+    const group = nodes.find((n) => n.data.type === 'group')
+    expect(group).toBeDefined()
+    expect(group?.data.label).toBe('My Group')
+    // groupX = 100-24=76, groupY = 100-48=52
+    expect(group?.position.x).toBe(76)
+    expect(group?.position.y).toBe(52)
+    // groupW = (500-100)+48=448, groupH = (280-100)+48+24=252
+    expect(group?.width).toBe(448)
+    expect(group?.height).toBe(252)
+  })
+
+  it('createGroup converts children to relative positions', () => {
+    const n1 = { ...makeNode('n1'), position: { x: 100, y: 100 }, width: 200, height: 80 }
+    const n2 = { ...makeNode('n2'), position: { x: 300, y: 200 }, width: 200, height: 80 }
+    useCanvasStore.setState({ nodes: [n1, n2] })
+
+    useCanvasStore.getState().createGroup(['n1', 'n2'], 'G')
+
+    const { nodes } = useCanvasStore.getState()
+    const c1 = nodes.find((n) => n.id === 'n1')
+    const c2 = nodes.find((n) => n.id === 'n2')
+    // groupX=76, groupY=52 → relative: n1=(24,48), n2=(224,148)
+    expect(c1?.position).toEqual({ x: 24, y: 48 })
+    expect(c2?.position).toEqual({ x: 224, y: 148 })
+  })
+
+  it('createGroup sets parentId and extent on children', () => {
+    const n1 = { ...makeNode('n1'), position: { x: 100, y: 100 } }
+    const n2 = { ...makeNode('n2'), position: { x: 200, y: 100 } }
+    useCanvasStore.setState({ nodes: [n1, n2] })
+
+    useCanvasStore.getState().createGroup(['n1', 'n2'], 'G')
+
+    const { nodes } = useCanvasStore.getState()
+    const group = nodes.find((n) => n.data.type === 'group')!
+    const c1 = nodes.find((n) => n.id === 'n1')
+    const c2 = nodes.find((n) => n.id === 'n2')
+    expect(c1?.parentId).toBe(group.id)
+    expect(c1?.extent).toBe('parent')
+    expect(c2?.parentId).toBe(group.id)
+  })
+
+  it('createGroup places the group node before its children in the array', () => {
+    const n1 = { ...makeNode('n1'), position: { x: 100, y: 100 } }
+    const n2 = { ...makeNode('n2'), position: { x: 200, y: 100 } }
+    useCanvasStore.setState({ nodes: [n1, n2] })
+
+    useCanvasStore.getState().createGroup(['n1', 'n2'], 'G')
+
+    const { nodes } = useCanvasStore.getState()
+    const groupIdx = nodes.findIndex((n) => n.data.type === 'group')
+    const c1Idx = nodes.findIndex((n) => n.id === 'n1')
+    const c2Idx = nodes.findIndex((n) => n.id === 'n2')
+    expect(groupIdx).toBeLessThan(c1Idx)
+    expect(groupIdx).toBeLessThan(c2Idx)
+  })
+
+  it('createGroup snapshots history and marks unsaved', () => {
+    const n1 = { ...makeNode('n1'), position: { x: 100, y: 100 } }
+    useCanvasStore.setState({ nodes: [n1] })
+    useCanvasStore.getState().markSaved()
+
+    useCanvasStore.getState().createGroup(['n1'], 'G')
+
+    expect(useCanvasStore.getState().past).toHaveLength(1)
+    expect(useCanvasStore.getState().hasUnsavedChanges).toBe(true)
+  })
+
+  it('createGroup clears selection', () => {
+    const n1 = { ...makeNode('n1'), position: { x: 100, y: 100 } }
+    useCanvasStore.setState({ nodes: [n1], selectedNodeId: 'n1', selectedNodeIds: ['n1'] })
+
+    useCanvasStore.getState().createGroup(['n1'], 'G')
+
+    expect(useCanvasStore.getState().selectedNodeId).toBeNull()
+    expect(useCanvasStore.getState().selectedNodeIds).toEqual([])
+  })
+
+  // ── ungroup ───────────────────────────────────────────────────────────────
+
+  it('ungroup restores children to absolute positions', () => {
+    const group = {
+      ...makeNode('g1', { type: 'group', label: 'G' }),
+      position: { x: 76, y: 52 },
+    }
+    const c1 = { ...makeNode('n1'), position: { x: 24, y: 48 }, parentId: 'g1', extent: 'parent' as const }
+    const c2 = { ...makeNode('n2'), position: { x: 224, y: 148 }, parentId: 'g1', extent: 'parent' as const }
+    useCanvasStore.setState({ nodes: [group, c1, c2] })
+
+    useCanvasStore.getState().ungroup('g1')
+
+    const { nodes } = useCanvasStore.getState()
+    const r1 = nodes.find((n) => n.id === 'n1')
+    const r2 = nodes.find((n) => n.id === 'n2')
+    expect(r1?.position).toEqual({ x: 100, y: 100 })
+    expect(r2?.position).toEqual({ x: 300, y: 200 })
+  })
+
+  it('ungroup removes parentId and extent from children', () => {
+    const group = { ...makeNode('g1', { type: 'group', label: 'G' }), position: { x: 0, y: 0 } }
+    const child = { ...makeNode('n1'), position: { x: 50, y: 50 }, parentId: 'g1', extent: 'parent' as const }
+    useCanvasStore.setState({ nodes: [group, child] })
+
+    useCanvasStore.getState().ungroup('g1')
+
+    const { nodes } = useCanvasStore.getState()
+    const released = nodes.find((n) => n.id === 'n1')
+    expect(released?.parentId).toBeUndefined()
+    expect(released?.extent).toBeUndefined()
+  })
+
+  it('ungroup deletes the group node', () => {
+    const group = { ...makeNode('g1', { type: 'group', label: 'G' }), position: { x: 0, y: 0 } }
+    useCanvasStore.setState({ nodes: [group] })
+
+    useCanvasStore.getState().ungroup('g1')
+
+    expect(useCanvasStore.getState().nodes.find((n) => n.id === 'g1')).toBeUndefined()
+  })
+
+  it('ungroup snapshots history and marks unsaved', () => {
+    const group = { ...makeNode('g1', { type: 'group', label: 'G' }), position: { x: 0, y: 0 } }
+    useCanvasStore.setState({ nodes: [group] })
+    useCanvasStore.getState().markSaved()
+
+    useCanvasStore.getState().ungroup('g1')
+
+    expect(useCanvasStore.getState().past).toHaveLength(1)
+    expect(useCanvasStore.getState().hasUnsavedChanges).toBe(true)
   })
 
   it('updateEdge updates edge data and marks unsaved', () => {

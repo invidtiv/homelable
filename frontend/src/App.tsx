@@ -35,7 +35,7 @@ const STANDALONE = import.meta.env.VITE_STANDALONE === 'true'
 const STANDALONE_STORAGE_KEY = 'homelable_canvas'
 
 export default function App() {
-  const { loadCanvas, markSaved, markUnsaved, selectedNodeId, addNode, updateNode, deleteNode, onConnect, updateEdge, deleteEdge, setProxmoxContainerMode, setNodeZIndex, editingGroupRectId, setEditingGroupRectId, nodes, edges, snapshotHistory, undo, redo, copySelectedNodes, pasteNodes } = useCanvasStore()
+  const { loadCanvas, markSaved, markUnsaved, selectedNodeId, selectedNodeIds, addNode, updateNode, deleteNode, onConnect, updateEdge, deleteEdge, setProxmoxContainerMode, setNodeZIndex, editingGroupRectId, setEditingGroupRectId, nodes, edges, snapshotHistory, undo, redo, copySelectedNodes, pasteNodes } = useCanvasStore()
   const canvasRef = useRef<HTMLDivElement>(null)
   const { isAuthenticated } = useAuthStore()
   const { activeTheme, setTheme } = useThemeStore()
@@ -100,8 +100,8 @@ export default function App() {
           // Build a map of proxmox container mode to know if children should be nested
           const proxmoxContainerMap = new Map<string, boolean>(
             (apiNodes as ApiNode[])
-              .filter((n) => n.type === 'proxmox')
-              .map((n) => [n.id, n.container_mode !== false])
+              .filter((n) => n.type === 'proxmox' || n.type === 'group')
+              .map((n) => [n.id, n.type === 'group' ? true : n.container_mode !== false])
           )
           const rfNodes = (apiNodes as ApiNode[]).map((n) => deserializeApiNode(n, proxmoxContainerMap))
           const rfEdges = (apiEdges as ApiEdge[]).map(deserializeApiEdge)
@@ -385,7 +385,7 @@ export default function App() {
               <div ref={canvasRef} className="flex-1 min-w-0 h-full">
                 <CanvasContainer onConnect={handleEdgeConnect} onEdgeDoubleClick={handleEdgeDoubleClick} onNodeDragStart={snapshotHistory} />
               </div>
-              {selectedNodeId && <DetailPanel onEdit={handleEditNode} />}
+              {(selectedNodeId || selectedNodeIds.length > 1) && <DetailPanel onEdit={handleEditNode} />}
             </div>
           </div>
         </div>

@@ -16,8 +16,10 @@ vi.mock('@xyflow/react', () => ({
   },
   Background: () => null,
   Controls: () => null,
+  ControlButton: () => null,
   BackgroundVariant: { Dots: 'dots' },
   ConnectionMode: { Loose: 'loose' },
+  SelectionMode: { Partial: 'partial' },
 }))
 
 vi.mock('@xyflow/react/dist/style.css', () => ({}))
@@ -149,6 +151,55 @@ describe('CanvasContainer', () => {
   it('sets deleteKeyCode to include both Backspace and Delete', () => {
     render(<CanvasContainer />)
     expect(rfProps.deleteKeyCode).toEqual(['Backspace', 'Delete'])
+  })
+
+  // ── Lasso / multi-select ──────────────────────────────────────────────────
+
+  it('enables selectionOnDrag for lasso selection', () => {
+    render(<CanvasContainer />)
+    expect(rfProps.selectionOnDrag).toBe(true)
+  })
+
+  it('sets panActivationKeyCode to Space', () => {
+    render(<CanvasContainer />)
+    expect(rfProps.panActivationKeyCode).toBe('Space')
+  })
+
+  it('sets panOnDrag to [1, 2]', () => {
+    render(<CanvasContainer />)
+    expect(rfProps.panOnDrag).toEqual([1, 2])
+  })
+
+  it('sets selectionMode to Partial', () => {
+    render(<CanvasContainer />)
+    expect(rfProps.selectionMode).toBe('partial')
+  })
+
+  it('sets multiSelectionKeyCode to Meta and Control', () => {
+    render(<CanvasContainer />)
+    expect(rfProps.multiSelectionKeyCode).toEqual(['Meta', 'Control'])
+  })
+
+  it('clears selectedNode (sets null) on Ctrl+click instead of selecting', () => {
+    const node = makeNode('n1')
+    useCanvasStore.setState({ nodes: [node], selectedNodeId: 'n1' })
+    render(<CanvasContainer />)
+    ;(rfProps.onNodeClick as (...args: unknown[]) => unknown)(
+      { ctrlKey: true, metaKey: false } as unknown as MouseEvent,
+      node,
+    )
+    expect(useCanvasStore.getState().selectedNodeId).toBeNull()
+  })
+
+  it('clears selectedNode (sets null) on Cmd+click', () => {
+    const node = makeNode('n1')
+    useCanvasStore.setState({ nodes: [node], selectedNodeId: 'n1' })
+    render(<CanvasContainer />)
+    ;(rfProps.onNodeClick as (...args: unknown[]) => unknown)(
+      { ctrlKey: false, metaKey: true } as unknown as MouseEvent,
+      node,
+    )
+    expect(useCanvasStore.getState().selectedNodeId).toBeNull()
   })
 
   // ── onBeforeDelete snapshot ───────────────────────────────────────────────

@@ -26,10 +26,13 @@ function setupStore(nodeData: Partial<NodeData> = {}) {
   vi.mocked(canvasStore.useCanvasStore).mockReturnValue({
     nodes: [makeNode(nodeData)],
     selectedNodeId: 'n1',
+    selectedNodeIds: [],
     setSelectedNode: vi.fn(),
     deleteNode: vi.fn(),
     updateNode: vi.fn(),
     snapshotHistory: vi.fn(),
+    createGroup: vi.fn(),
+    ungroup: vi.fn(),
   } as unknown as ReturnType<typeof canvasStore.useCanvasStore>)
 }
 
@@ -38,10 +41,13 @@ describe('DetailPanel', () => {
     vi.mocked(canvasStore.useCanvasStore).mockReturnValue({
       nodes: [],
       selectedNodeId: null,
+      selectedNodeIds: [],
       setSelectedNode: vi.fn(),
       deleteNode: vi.fn(),
       updateNode: vi.fn(),
       snapshotHistory: vi.fn(),
+      createGroup: vi.fn(),
+      ungroup: vi.fn(),
     } as unknown as ReturnType<typeof canvasStore.useCanvasStore>)
   })
 

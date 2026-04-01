@@ -1,6 +1,7 @@
 import { IspNode, RouterNode, SwitchNode, ServerNode, VmNode, LxcNode, NasNode, IotNode, ApNode, CameraNode, PrinterNode, ComputerNode, CplNode, DockerNode, GenericNode } from './index'
 import { ProxmoxGroupNode } from './ProxmoxGroupNode'
 import { GroupRectNode } from './GroupRectNode'
+import { GroupNode } from './GroupNode'
 
 export const nodeTypes = {
   isp: IspNode,
@@ -20,4 +21,5 @@ export const nodeTypes = {
   docker: DockerNode,
   generic: GenericNode,
   groupRect: GroupRectNode,
+  group: GroupNode,
 }

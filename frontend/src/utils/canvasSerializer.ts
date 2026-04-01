@@ -63,7 +63,7 @@ export function serializeNode(n: Node<NodeData>): Record<string, unknown> {
       check_target: null,
       services: [],
       notes: null,
-      parent_id: null,
+      parent_id: n.data.parent_id ?? null,
       container_mode: false,
       custom_icon: null,
       pos_x: n.position.x,
@@ -142,6 +142,7 @@ export function deserializeApiNode(
       width: w,
       height: h,
       zIndex: z - 10,
+      ...(n.parent_id ? { parentId: n.parent_id, extent: 'parent' as const } : {}),
     }
   }
   const parentIsContainer = n.parent_id ? (proxmoxContainerMap.get(n.parent_id) ?? false) : false
