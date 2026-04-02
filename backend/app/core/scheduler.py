@@ -76,7 +76,10 @@ async def _run_status_checks() -> None:
 def start_scheduler() -> None:
     global scheduler
     if scheduler.running:
-        scheduler.shutdown(wait=False)
+        try:
+            scheduler.shutdown(wait=False)
+        except Exception as exc:
+            logger.warning("Failed to shut down previous scheduler instance: %s", exc)
     scheduler = AsyncIOScheduler()
     scheduler.add_job(
         _run_status_checks,
@@ -92,6 +95,8 @@ def start_scheduler() -> None:
 
 def reschedule_status_checks(interval_seconds: int) -> None:
     """Update the status check interval on the running scheduler."""
+    if interval_seconds < 10:
+        raise ValueError(f"interval_seconds must be >= 10, got {interval_seconds}")
     if not scheduler.running:
         logger.warning("Scheduler not running, skipping reschedule")
         return
