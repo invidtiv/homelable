@@ -31,6 +31,7 @@ class NodeSave(BaseModel):
     show_hardware: bool = False
     width: float | None = None
     height: float | None = None
+    bottom_handles: int = 1
     pos_x: float = 0
     pos_y: float = 0
 

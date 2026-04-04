@@ -20,6 +20,7 @@ vi.mock('@xyflow/react', () => ({
   BackgroundVariant: { Dots: 'dots' },
   ConnectionMode: { Loose: 'loose' },
   SelectionMode: { Partial: 'partial' },
+  useReactFlow: () => ({ fitView: vi.fn() }),
 }))
 
 vi.mock('@xyflow/react/dist/style.css', () => ({}))

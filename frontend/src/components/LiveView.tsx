@@ -18,6 +18,7 @@ import {
   BackgroundVariant,
   Controls,
   ConnectionMode,
+  useReactFlow,
   type Node,
 } from '@xyflow/react'
 import '@xyflow/react/dist/style.css'
@@ -36,7 +37,8 @@ const STORAGE_KEY = 'homelable_canvas'
 type ViewState = 'loading' | 'disabled' | 'invalid-key' | 'no-key' | 'network-error' | 'ready'
 
 function LiveViewCanvas() {
-  const { nodes, edges, loadCanvas } = useCanvasStore()
+  const { nodes, edges, loadCanvas, fitViewPending, clearFitViewPending } = useCanvasStore()
+  const { fitView } = useReactFlow()
   const activeTheme = useThemeStore((s) => s.activeTheme)
   const theme = THEMES[activeTheme]
   // Derive initial view state synchronously (avoids calling setState inside an effect):
@@ -87,6 +89,15 @@ function LiveViewCanvas() {
       })
   }, [loadCanvas])
 
+  useEffect(() => {
+    if (!fitViewPending || nodes.length === 0) return
+    const id = setTimeout(() => {
+      fitView({ padding: 0.12, duration: 350 })
+      clearFitViewPending()
+    }, 50)
+    return () => clearTimeout(id)
+  }, [fitViewPending, nodes.length, fitView, clearFitViewPending])
+
   const onNodeClick = useCallback((_: React.MouseEvent, node: Node<NodeData>) => {
     const ip = node.data.ip
     if (ip) window.open(`http://${ip}`, '_blank', 'noopener,noreferrer')
@@ -129,7 +140,6 @@ function LiveViewCanvas() {
         elementsSelectable={false}
         panOnDrag
         zoomOnScroll
-        fitView
         colorMode={theme.colors.reactFlowColorMode}
         connectionMode={ConnectionMode.Loose}
         onNodeClick={onNodeClick}

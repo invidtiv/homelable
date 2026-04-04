@@ -56,6 +56,7 @@ export const scanApi = {
   pending: () => api.get('/scan/pending'),
   hidden: () => api.get('/scan/hidden'),
   runs: () => api.get('/scan/runs'),
+  clearPending: () => api.delete('/scan/pending'),
   approve: (id: string, nodeData: object) => api.post(`/scan/pending/${id}/approve`, nodeData),
   hide: (id: string) => api.post(`/scan/pending/${id}/hide`),
   ignore: (id: string) => api.post(`/scan/pending/${id}/ignore`),

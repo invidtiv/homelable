@@ -1,5 +1,5 @@
-import { createElement } from 'react'
-import { Handle, Position, NodeResizer, type NodeProps, type Node } from '@xyflow/react'
+import { createElement, useEffect } from 'react'
+import { Handle, Position, NodeResizer, useUpdateNodeInternals, type NodeProps, type Node } from '@xyflow/react'
 import { Cpu, MemoryStick, HardDrive, type LucideIcon } from 'lucide-react'
 import type { NodeData } from '@/types'
 import { resolveNodeColors } from '@/utils/nodeColors'
@@ -8,6 +8,7 @@ import { useThemeStore } from '@/stores/themeStore'
 import { THEMES } from '@/utils/themes'
 import { useCanvasStore } from '@/stores/canvasStore'
 import { maskIp } from '@/utils/maskIp'
+import { BOTTOM_HANDLE_IDS, BOTTOM_HANDLE_POSITIONS } from '@/utils/handleUtils'
 
 interface BaseNodeProps extends NodeProps<Node<NodeData>> {
   icon: LucideIcon
@@ -18,7 +19,10 @@ function formatStorage(gb: number): string {
   return `${gb} GB`
 }
 
-export function BaseNode({ data, selected, icon: typeIcon, width, height }: BaseNodeProps) {
+export function BaseNode({ id, data, selected, icon: typeIcon, width, height }: BaseNodeProps) {
+  const updateNodeInternals = useUpdateNodeInternals()
+  useEffect(() => { updateNodeInternals(id) }, [data.bottom_handles, id, updateNodeInternals])
+
   const activeTheme = useThemeStore((s) => s.activeTheme)
   const hideIp = useCanvasStore((s) => s.hideIp)
   const theme = THEMES[activeTheme]
@@ -141,13 +145,26 @@ export function BaseNode({ data, selected, icon: typeIcon, width, height }: Base
         title={data.status}
       />
 
-      <Handle
-        type="source"
-        position={Position.Bottom}
-        id="bottom"
-        style={{ background: theme.colors.handleBackground, borderColor: theme.colors.handleBorder }}
-      />
-      <Handle type="target" position={Position.Bottom} id="bottom-t" style={{ opacity: 0, width: 12, height: 12 }} />
+      {(BOTTOM_HANDLE_POSITIONS[data.bottom_handles ?? 1] ?? BOTTOM_HANDLE_POSITIONS[1]).map((leftPct, idx) => {
+        const sourceId = BOTTOM_HANDLE_IDS[idx]
+        const targetId = idx === 0 ? 'bottom-t' : `bottom-${idx + 1}-t`
+        return (
+          <span key={sourceId}>
+            <Handle
+              type="source"
+              position={Position.Bottom}
+              id={sourceId}
+              style={{ left: `${leftPct}%`, background: theme.colors.handleBackground, borderColor: theme.colors.handleBorder }}
+            />
+            <Handle
+              type="target"
+              position={Position.Bottom}
+              id={targetId}
+              style={{ left: `${leftPct}%`, opacity: 0, width: 12, height: 12 }}
+            />
+          </span>
+        )
+      })}
     </div>
   )
 }

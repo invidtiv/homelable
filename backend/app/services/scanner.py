@@ -1,7 +1,12 @@
 """Network scanner: ARP sweep + nmap service detection + mDNS discovery."""
 import asyncio
+import ipaddress
 import logging
+import os
+import re
 import socket
+import subprocess
+import threading
 from datetime import datetime, timezone
 from typing import Any
 
@@ -13,8 +18,9 @@ from app.services.fingerprint import fingerprint_ports, suggest_node_type
 
 logger = logging.getLogger(__name__)
 
-# Run IDs that have been requested to cancel
+# Run IDs that have been requested to cancel (thread-safe via lock)
 _cancelled_runs: set[str] = set()
+_cancelled_lock = threading.Lock()
 
 # Port list for service detection (Phase 2)
 _EXTRA_PORTS = (
@@ -55,11 +61,13 @@ except ImportError:
 
 def request_cancel(run_id: str) -> None:
     """Signal a running scan to stop early."""
-    _cancelled_runs.add(run_id)
+    with _cancelled_lock:
+        _cancelled_runs.add(run_id)
 
 
 def _is_cancelled(run_id: str) -> bool:
-    return run_id in _cancelled_runs
+    with _cancelled_lock:
+        return run_id in _cancelled_runs
 
 
 def _resolve_hostname(ip: str) -> str | None:
@@ -79,80 +87,216 @@ def _extract_os(nm: object, host: str) -> str | None:
     return None
 
 
-def _nmap_arp_sweep(target: str) -> dict[str, dict[str, Any]]:
+def _arp_table_hosts(network: str) -> dict[str, dict[str, Any]]:
     """
-    Phase 1: ARP ping sweep — finds ALL alive hosts regardless of open ports.
-    Returns {ip: host_dict} for every host that responds.
+    Read the OS ARP cache for recently-seen hosts in the target network.
+    Works without root on both Linux (/proc/net/arp) and macOS (arp -a).
+    Supplements nmap discovery — catches IoT and devices with all ports filtered.
     """
-    nm = nmap.PortScanner()
-    nm.scan(hosts=target, arguments="-sn -PR -PA80,443 --host-timeout 10s")
+    try:
+        net = ipaddress.ip_network(network, strict=False)
+        found: dict[str, dict[str, Any]] = {}
+
+        # Linux: parse /proc/net/arp — present on any Linux kernel (including Docker)
+        proc_arp = "/proc/net/arp"
+        try:
+            with open(proc_arp) as f:
+                for line in f.readlines()[1:]:  # skip header row
+                    parts = line.split()
+                    if len(parts) >= 4:
+                        ip, mac = parts[0], parts[3]
+                        if mac == "00:00:00:00:00:00":
+                            continue
+                        try:
+                            if ipaddress.ip_address(ip) in net:
+                                found[ip] = {
+                                    "ip": ip, "mac": mac,
+                                    "hostname": _resolve_hostname(ip),
+                                    "os": None, "open_ports": [],
+                                }
+                        except ValueError:
+                            pass
+            # /proc/net/arp opened successfully — return whatever we found (may be empty)
+            # Don't fall through to `arp -a` since we're on Linux
+            return found
+        except FileNotFoundError:
+            pass  # Not Linux — fall through to macOS `arp -a`
+
+        # macOS: parse `arp -a` output
+        result = subprocess.run(["arp", "-a"], capture_output=True, text=True, timeout=5)
+        for line in result.stdout.splitlines():
+            m = re.search(r"\((\d+\.\d+\.\d+\.\d+)\)\s+at\s+([0-9a-f:]+)", line)
+            if not m:
+                continue
+            ip, mac = m.group(1), m.group(2)
+            if mac in ("(incomplete)", "ff:ff:ff:ff:ff:ff"):
+                continue
+            try:
+                if ipaddress.ip_address(ip) in net:
+                    found[ip] = {"ip": ip, "mac": mac, "hostname": _resolve_hostname(ip), "os": None, "open_ports": []}
+            except ValueError:
+                pass
+        return found
+    except Exception as exc:
+        logger.warning("[Phase 1] ARP cache lookup failed: %s", exc)
+        return {}
+
+
+async def _ping_sweep(target: str) -> dict[str, dict[str, Any]]:
+    """
+    Phase 1: Concurrent ICMP ping sweep + ARP cache.
+    Pings all IPs in the CIDR in parallel (up to 50 at once, 1s timeout each).
+    Supplements with the OS ARP cache to catch devices that block ICMP.
+    Works in Docker with CAP_NET_RAW — no nmap, no false positives.
+    """
+    net = ipaddress.ip_network(target, strict=False)
+    all_ips = [str(ip) for ip in net.hosts()]
+    logger.info("[Phase 1] Pinging %d hosts in %s ...", len(all_ips), target)
+
+    sem = asyncio.Semaphore(50)
+
+    async def _ping(ip: str) -> str | None:
+        async with sem:
+            try:
+                proc = await asyncio.create_subprocess_exec(
+                    "ping", "-c", "1", "-W", "1", ip,
+                    stdout=asyncio.subprocess.DEVNULL,
+                    stderr=asyncio.subprocess.DEVNULL,
+                )
+                await proc.wait()
+                return ip if proc.returncode == 0 else None
+            except Exception:
+                return None
+
+    ping_results = await asyncio.gather(*[_ping(ip) for ip in all_ips])
+    alive_ips: set[str] = {ip for ip in ping_results if ip is not None}
+    logger.info("[Phase 1] %d/%d hosts responded to ping", len(alive_ips), len(all_ips))
+
+    # ARP cache: catch devices that block ICMP but were recently active,
+    # and enrich ping-alive hosts with their MAC addresses.
+    arp_cache = await asyncio.to_thread(_arp_table_hosts, target)
+
     alive: dict[str, dict[str, Any]] = {}
-    for host in nm.all_hosts():
-        if nm[host].state() == "up":
-            alive[host] = {
-                "ip": host,
-                "hostname": _resolve_hostname(host),
-                "mac": nm[host].get("addresses", {}).get("mac"),
-                "os": None,
-                "open_ports": [],
-            }
+
+    for ip in alive_ips:
+        mac = arp_cache.get(ip, {}).get("mac")
+        hostname = await asyncio.to_thread(_resolve_hostname, ip)
+        logger.info("[Phase 1] %s  mac=%s  hostname=%s  (ping)", ip, mac or "n/a", hostname or "n/a")
+        alive[ip] = {"ip": ip, "mac": mac, "hostname": hostname, "os": None, "open_ports": []}
+
+    for ip, host in arp_cache.items():
+        if ip not in alive:
+            logger.info(
+                "[Phase 1] %s  mac=%s  hostname=%s  (ARP cache only)",
+                ip, host.get("mac") or "n/a", host.get("hostname") or "n/a",
+            )
+            alive[ip] = host
+
     return alive
 
 
-def _nmap_port_scan(alive: dict[str, dict[str, Any]]) -> list[dict[str, Any]]:
+def _nmap_scan_single(host_dict: dict[str, Any]) -> dict[str, Any]:
     """
-    Phase 2: Service detection on the alive host set from Phase 1.
-    Mutates alive in-place with open_ports/os; returns all hosts including
-    those with zero open ports (IoT devices often have none).
+    Phase 2 — single-IP port scan with service detection.
+    Runs in a thread (blocking). Returns the host dict enriched with open_ports.
+    """
+    ip = host_dict["ip"]
+    logger.info("[Phase 2] Scanning %s ...", ip)
+
+    if not _NMAP_AVAILABLE:
+        logger.warning("[Phase 2] nmap not available, skipping %s", ip)
+        return host_dict
+
+    is_root = os.geteuid() == 0
+    if is_root:
+        # SYN scan + version detection (fastest, most accurate)
+        scan_args = f"-sS -sV --open -T4 -Pn --host-timeout 60s -p {_EXTRA_PORTS}"
+    else:
+        # TCP connect scan (-sT) — no raw sockets needed, works without root.
+        # nmap auto-selects -sT without root but being explicit avoids edge cases.
+        scan_args = f"-sT -sV --open -T4 -Pn --host-timeout 60s -p {_EXTRA_PORTS}"
+
+    logger.debug("[Phase 2] %s args: %s", ip, scan_args)
+    nm = nmap.PortScanner()
+    try:
+        nm.scan(hosts=ip, arguments=scan_args)
+    except Exception as exc:
+        logger.warning("[Phase 2] nmap FAILED for %s (%s: %s) — skipping port scan", ip, type(exc).__name__, exc)
+        return host_dict
+
+    all_scanned = nm.all_hosts()
+    logger.debug("[Phase 2] %s — nmap returned %d host(s) in results", ip, len(all_scanned))
+    if ip not in all_scanned:
+        logger.info("[Phase 2] %s — no open ports found (all closed/filtered or nmap had no results)", ip)
+        return host_dict
+
+    open_ports = []
+    for proto in nm[ip].all_protocols():
+        for port, info in nm[ip][proto].items():
+            if info["state"] == "open":
+                banner = (info.get("product", "") + " " + info.get("version", "")).strip()
+                open_ports.append({"port": port, "protocol": proto, "banner": banner})
+
+    if open_ports:
+        port_summary = ", ".join(
+            f"{p['port']}/{p['protocol']} ({p['banner'] or 'unknown'})" for p in open_ports
+        )
+        logger.info("[Phase 2] %s — %d open port(s): %s", ip, len(open_ports), port_summary)
+    else:
+        logger.info("[Phase 2] %s — 0 open ports detected", ip)
+
+    host_dict["open_ports"] = open_ports
+    if not host_dict["mac"]:
+        host_dict["mac"] = nm[ip].get("addresses", {}).get("mac")
+    host_dict["os"] = _extract_os(nm, ip)
+    return host_dict
+
+
+async def _nmap_port_scan(alive: dict[str, dict[str, Any]]) -> list[dict[str, Any]]:
+    """
+    Phase 2: Per-IP service detection with bounded concurrency.
+    Each host is scanned independently in a thread — no inter-host timeout interference.
+    Up to 10 hosts scanned concurrently.
     """
     if not alive:
         return []
-    nm = nmap.PortScanner()
-    try:
-        nm.scan(
-            hosts=" ".join(alive.keys()),
-            arguments=f"-sV --open -T4 --host-timeout 30s -p {_EXTRA_PORTS}",
-        )
-    except Exception as exc:
-        logger.warning("Port scan failed, returning ARP-only results: %s", exc)
-        return list(alive.values())
 
-    for host in nm.all_hosts():
-        if host not in alive:
-            continue
-        open_ports = []
-        for proto in nm[host].all_protocols():
-            for port, info in nm[host][proto].items():
-                if info["state"] == "open":
-                    open_ports.append({
-                        "port": port,
-                        "protocol": proto,
-                        "banner": (
-                            info.get("product", "") + " " + info.get("version", "")
-                        ).strip(),
-                    })
-        alive[host]["open_ports"] = open_ports
-        if not alive[host]["mac"]:
-            alive[host]["mac"] = nm[host].get("addresses", {}).get("mac")
-        alive[host]["os"] = _extract_os(nm, host)
+    logger.info("[Phase 2] Starting per-IP port scan for %d host(s)", len(alive))
+    semaphore = asyncio.Semaphore(10)
 
-    return list(alive.values())
+    async def _scan_with_sem(host_dict: dict[str, Any]) -> dict[str, Any]:
+        async with semaphore:
+            return await asyncio.to_thread(_nmap_scan_single, host_dict)
+
+    raw = await asyncio.gather(*[_scan_with_sem(h) for h in alive.values()], return_exceptions=True)
+    results = []
+    for item in raw:
+        if isinstance(item, BaseException):
+            logger.warning("[Phase 2] Unexpected error in gather: %s", item)
+        else:
+            results.append(item)
+    logger.info("[Phase 2] Completed — %d/%d host(s) scanned", len(results), len(alive))
+    return results
 
 
-def _nmap_scan(target: str) -> list[dict[str, Any]]:
+async def _nmap_scan(target: str) -> list[dict[str, Any]]:
     """
-    Full two-phase scan for a CIDR range.
-    Phase 1: ARP sweep to find alive hosts (catches IoT with no open ports).
-    Phase 2: Service detection on alive hosts only.
+    Two-phase scan for a CIDR range.
+    Phase 1: Concurrent ping sweep to find alive hosts (fast, no false positives).
+    Phase 2: Per-IP nmap port scan with service detection (bounded concurrency, 10 at a time).
     """
+    logger.info("[Scan] Starting scan for %s — nmap available: %s", target, _NMAP_AVAILABLE)
     if not _NMAP_AVAILABLE:
+        logger.warning("[Scan] nmap not available — returning mock data")
         return _mock_scan(target)
     try:
-        alive = _nmap_arp_sweep(target)
+        alive = await _ping_sweep(target)
+        logger.info("[Phase 1] Found %d alive host(s) in %s: %s",
+                    len(alive), target, ", ".join(sorted(alive.keys())))
     except Exception as exc:
-        logger.error("nmap ARP sweep failed: %s", exc)
+        logger.error("Phase 1 ping sweep failed: %s", exc)
         raise RuntimeError(str(exc)) from exc
-    return _nmap_port_scan(alive)
+    return await _nmap_port_scan(alive)
 
 
 async def _mdns_discover(timeout: float = 4.0) -> list[dict[str, Any]]:
@@ -236,45 +380,50 @@ async def run_scan(ranges: list[str], db: AsyncSession, run_id: str) -> None:
     from app.api.routes.status import broadcast_scan_update
 
     devices_found = 0
+    mdns_task: asyncio.Task[list[dict[str, Any]]] | None = None
     try:
-        # Clean up stale pending devices whose IPs are already in the canvas
+        # Validate all ranges are valid CIDRs before passing anything to nmap
+        for r in ranges:
+            try:
+                ipaddress.ip_network(r, strict=False)
+            except ValueError:
+                raise ValueError(f"Invalid CIDR range: {r!r}") from None
+
+        # Pre-fetch canvas IPs and hidden IPs once — avoids N+1 queries per host
         canvas_ips_result = await db.execute(select(Node.ip).where(Node.ip.isnot(None)))
         canvas_ips: set[str] = {row[0] for row in canvas_ips_result.fetchall()}
+
+        hidden_ips_result = await db.execute(
+            select(PendingDevice.ip).where(PendingDevice.status == "hidden")
+        )
+        hidden_ips: set[str] = {row[0] for row in hidden_ips_result.fetchall()}
+
+        # Clean up stale pending devices whose IPs are already in the canvas
         if canvas_ips:
-            stale_result = await db.execute(
-                select(PendingDevice).where(
+            from sqlalchemy import delete as sa_delete
+            await db.execute(
+                sa_delete(PendingDevice).where(
                     PendingDevice.status == "pending",
                     PendingDevice.ip.in_(canvas_ips),
                 )
             )
-            for stale in stale_result.scalars().all():
-                await db.delete(stale)
             await db.commit()
 
         # Start mDNS discovery in the background while nmap scans run
-        mdns_task: asyncio.Task[list[dict[str, Any]]] = asyncio.create_task(
-            _mdns_discover()
-        )
+        mdns_task = asyncio.create_task(_mdns_discover())
 
         # Track IPs found by nmap so mDNS doesn't duplicate them
         nmap_ips: set[str] = set()
 
-        async def _process_host(host: dict[str, Any]) -> None:
+        async def _process_host(host: dict[str, Any], discovery_source: str = "arp") -> None:
             nonlocal devices_found
             ip = host["ip"]
 
-            # Skip canvas nodes and user-hidden devices
-            canvas_result = await db.execute(select(Node).where(Node.ip == ip))
-            if canvas_result.scalar_one_or_none() is not None:
+            # Skip canvas nodes and user-hidden devices (sets pre-fetched before loop)
+            if ip in canvas_ips:
                 logger.debug("Skipping %s — already in canvas", ip)
                 return
-            hidden_result = await db.execute(
-                select(PendingDevice).where(
-                    PendingDevice.ip == ip,
-                    PendingDevice.status == "hidden",
-                )
-            )
-            if hidden_result.scalar_one_or_none() is not None:
+            if ip in hidden_ips:
                 logger.debug("Skipping %s — hidden by user", ip)
                 return
 
@@ -303,43 +452,40 @@ async def run_scan(ranges: list[str], db: AsyncSession, run_id: str) -> None:
                     services=services,
                     suggested_type=suggested_type,
                     status="pending",
+                    discovery_source=discovery_source,
                 ))
                 devices_found += 1
 
             await db.commit()
-
-            run = await db.get(ScanRun, run_id)
-            if run:
-                run.devices_found = devices_found
-                await db.commit()
-
             await broadcast_scan_update(run_id=run_id, devices_found=devices_found)
 
         # nmap scan per CIDR — results stream in progressively
         for cidr in ranges:
             if _is_cancelled(run_id):
                 break
-            hosts = await asyncio.to_thread(_nmap_scan, cidr)
+            hosts = await _nmap_scan(cidr)
             for host in hosts:
                 if _is_cancelled(run_id):
                     break
                 nmap_ips.add(host["ip"])
                 await _process_host(host)
 
-        # Collect mDNS results; add devices not already found by nmap
+        # Update ScanRun count once after all CIDR ranges
+        run = await db.get(ScanRun, run_id)
+        if run:
+            run.devices_found = devices_found
+            await db.commit()
+
+        # Collect mDNS results — task already has its own 4s internal timeout
         if not _is_cancelled(run_id):
-            try:
-                mdns_hosts = await asyncio.wait_for(mdns_task, timeout=1.0)
-            except asyncio.TimeoutError:
-                mdns_task.cancel()
-                mdns_hosts = []
+            mdns_hosts = await mdns_task
 
             for host in mdns_hosts:
                 if _is_cancelled(run_id):
                     break
                 if host["ip"] in nmap_ips:
                     continue  # already processed with richer nmap data
-                await _process_host(host)
+                await _process_host(host, discovery_source="mdns")
         else:
             mdns_task.cancel()
 
@@ -353,6 +499,8 @@ async def run_scan(ranges: list[str], db: AsyncSession, run_id: str) -> None:
 
     except Exception as exc:
         logger.error("Scan failed: %s", exc)
+        if mdns_task is not None and not mdns_task.done():
+            mdns_task.cancel()
         run = await db.get(ScanRun, run_id)
         if run:
             run.status = "error"
@@ -360,4 +508,5 @@ async def run_scan(ranges: list[str], db: AsyncSession, run_id: str) -> None:
             run.finished_at = datetime.now(timezone.utc)
             await db.commit()
     finally:
-        _cancelled_runs.discard(run_id)
+        with _cancelled_lock:
+            _cancelled_runs.discard(run_id)

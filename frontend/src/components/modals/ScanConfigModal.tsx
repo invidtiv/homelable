@@ -99,7 +99,6 @@ export function ScanConfigModal({ open, onClose, onScanNow }: ScanConfigModalPro
 
         <DialogFooter className="gap-2">
           <Button variant="ghost" onClick={onClose}>Cancel</Button>
-          <Button variant="outline" onClick={handleSave} disabled={saving}>Save</Button>
           <Button
             onClick={handleScanNow}
             disabled={saving}
