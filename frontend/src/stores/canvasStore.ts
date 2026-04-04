@@ -11,6 +11,7 @@ import {
 } from '@xyflow/react'
 import type { NodeData, EdgeData } from '@/types'
 import { generateUUID } from '@/utils/uuid'
+import { normalizeHandle, removedBottomHandleIds } from '@/utils/handleUtils'
 
 type HistoryEntry = { nodes: Node<NodeData>[]; edges: Edge<EdgeData>[] }
 
@@ -52,6 +53,8 @@ interface CanvasState {
   markSaved: () => void
   markUnsaved: () => void
   loadCanvas: (nodes: Node<NodeData>[], edges: Edge<EdgeData>[]) => void
+  fitViewPending: boolean
+  clearFitViewPending: () => void
   notifyScanDeviceFound: () => void
   hideIp: boolean
   toggleHideIp: () => void
@@ -66,6 +69,7 @@ export const useCanvasStore = create<CanvasState>((set) => ({
   editingGroupRectId: null,
   hideIp: false,
   scanEventTs: 0,
+  fitViewPending: false,
 
   past: [],
   future: [],
@@ -149,10 +153,6 @@ export const useCanvasStore = create<CanvasState>((set) => ({
     set((state) => {
       const extra = connection as Connection & Partial<EdgeData>
       const edgeType = extra.type ?? 'ethernet'
-      // Normalize invisible stub handle IDs so React Flow can locate the handle
-      // and render the edge immediately (top-t / bottom-t are opacity:0 helpers).
-      const normalizeHandle = (h: string | null | undefined) =>
-        h === 'top-t' ? 'top' : h === 'bottom-t' ? 'bottom' : (h ?? null)
       return {
         edges: addEdge({
           ...connection,
@@ -165,10 +165,10 @@ export const useCanvasStore = create<CanvasState>((set) => ({
       }
     }),
 
-  setSelectedNode: (id) => set((state) => ({
+  setSelectedNode: (id) => set({
     selectedNodeId: id,
-    selectedNodeIds: id ? state.selectedNodeIds : [],
-  })),
+    selectedNodeIds: id ? [id] : [],
+  }),
 
   addNode: (node) =>
     set((state) => {
@@ -226,7 +226,25 @@ export const useCanvasStore = create<CanvasState>((set) => ({
         const children = nodes.filter((n) => !!n.parentId)
         nodes = [...parents, ...children]
       }
-      return { nodes, hasUnsavedChanges: true }
+      // Remap edges when bottom_handles is reduced so no edge disappears
+      let edges = state.edges
+      if ('bottom_handles' in data && data.bottom_handles != null) {
+        const currentNode = state.nodes.find((n) => n.id === id)
+        const oldCount = currentNode?.data.bottom_handles ?? 1
+        const newCount = data.bottom_handles
+        if (newCount < oldCount) {
+          const removed = removedBottomHandleIds(oldCount, newCount)
+          edges = state.edges.map((e) => {
+            if (e.source === id && e.sourceHandle && removed.has(e.sourceHandle))
+              return { ...e, sourceHandle: 'bottom' }
+            if (e.target === id && e.targetHandle && removed.has(e.targetHandle))
+              return { ...e, targetHandle: 'bottom' }
+            return e
+          })
+        }
+      }
+
+      return { nodes, edges, hasUnsavedChanges: true }
     }),
 
   deleteNode: (id) =>
@@ -409,6 +427,8 @@ export const useCanvasStore = create<CanvasState>((set) => ({
     // React Flow requires parents before children in the array
     const parents = nodes.filter((n) => !n.parentId)
     const children = nodes.filter((n) => !!n.parentId)
-    set({ nodes: [...parents, ...children], edges, hasUnsavedChanges: false, selectedNodeId: null, past: [], future: [], clipboard: [] })
+    set({ nodes: [...parents, ...children], edges, hasUnsavedChanges: false, selectedNodeId: null, past: [], future: [], clipboard: [], fitViewPending: true })
   },
+
+  clearFitViewPending: () => set({ fitViewPending: false }),
 }))

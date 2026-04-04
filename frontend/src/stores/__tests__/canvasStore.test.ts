@@ -253,11 +253,11 @@ describe('canvasStore', () => {
     expect(useCanvasStore.getState().selectedNodeIds).toEqual([])
   })
 
-  it('setSelectedNode(id) preserves existing selectedNodeIds', () => {
+  it('setSelectedNode(id) sets selectedNodeIds to [id], clearing multi-selection', () => {
     useCanvasStore.setState({ selectedNodeIds: ['n1', 'n2'] })
     useCanvasStore.getState().setSelectedNode('n1')
-    // does NOT wipe selectedNodeIds when setting a specific id
-    expect(useCanvasStore.getState().selectedNodeIds).toEqual(['n1', 'n2'])
+    // Single node click resets multi-selection to just the clicked node
+    expect(useCanvasStore.getState().selectedNodeIds).toEqual(['n1'])
   })
 
   // ── createGroup ───────────────────────────────────────────────────────────
@@ -617,5 +617,62 @@ describe('canvasStore', () => {
     const stored = useCanvasStore.getState().nodes.find((n) => n.id === 'n1')
     expect(stored?.width).toBeUndefined()
     expect(stored?.height).toBeUndefined()
+  })
+
+  // ── bottom_handles edge remapping ──────────────────────────────────────────
+
+  it('remaps source edges to "bottom" when bottom_handles is reduced', () => {
+    const node = makeNode('n1', { bottom_handles: 4 })
+    const edge = { ...makeEdge('e1', 'n1', 'n2'), sourceHandle: 'bottom-3' }
+    useCanvasStore.setState({ nodes: [node, makeNode('n2')], edges: [edge] })
+
+    useCanvasStore.getState().updateNode('n1', { bottom_handles: 2 })
+
+    const updated = useCanvasStore.getState().edges.find((e) => e.id === 'e1')
+    expect(updated?.sourceHandle).toBe('bottom')
+  })
+
+  it('remaps target edges to "bottom" when bottom_handles is reduced', () => {
+    const node = makeNode('n2', { bottom_handles: 3 })
+    const edge = { ...makeEdge('e1', 'n1', 'n2'), targetHandle: 'bottom-3' }
+    useCanvasStore.setState({ nodes: [makeNode('n1'), node], edges: [edge] })
+
+    useCanvasStore.getState().updateNode('n2', { bottom_handles: 1 })
+
+    const updated = useCanvasStore.getState().edges.find((e) => e.id === 'e1')
+    expect(updated?.targetHandle).toBe('bottom')
+  })
+
+  it('does not remap edges that are on handles still present after reduction', () => {
+    const node = makeNode('n1', { bottom_handles: 4 })
+    const edge = { ...makeEdge('e1', 'n1', 'n2'), sourceHandle: 'bottom-2' }
+    useCanvasStore.setState({ nodes: [node, makeNode('n2')], edges: [edge] })
+
+    useCanvasStore.getState().updateNode('n1', { bottom_handles: 3 })
+
+    const updated = useCanvasStore.getState().edges.find((e) => e.id === 'e1')
+    expect(updated?.sourceHandle).toBe('bottom-2')
+  })
+
+  it('does not remap edges when bottom_handles increases', () => {
+    const node = makeNode('n1', { bottom_handles: 2 })
+    const edge = { ...makeEdge('e1', 'n1', 'n2'), sourceHandle: 'bottom' }
+    useCanvasStore.setState({ nodes: [node, makeNode('n2')], edges: [edge] })
+
+    useCanvasStore.getState().updateNode('n1', { bottom_handles: 4 })
+
+    const updated = useCanvasStore.getState().edges.find((e) => e.id === 'e1')
+    expect(updated?.sourceHandle).toBe('bottom')
+  })
+
+  it('never remaps the "bottom" handle itself', () => {
+    const node = makeNode('n1', { bottom_handles: 4 })
+    const edge = { ...makeEdge('e1', 'n1', 'n2'), sourceHandle: 'bottom' }
+    useCanvasStore.setState({ nodes: [node, makeNode('n2')], edges: [edge] })
+
+    useCanvasStore.getState().updateNode('n1', { bottom_handles: 1 })
+
+    const updated = useCanvasStore.getState().edges.find((e) => e.id === 'e1')
+    expect(updated?.sourceHandle).toBe('bottom')
   })
 })

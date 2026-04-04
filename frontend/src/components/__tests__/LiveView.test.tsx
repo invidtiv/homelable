@@ -11,6 +11,7 @@ vi.mock('@xyflow/react', () => ({
   Controls: () => null,
   BackgroundVariant: { Dots: 'dots' },
   ConnectionMode: { Loose: 'loose' },
+  useReactFlow: () => ({ fitView: vi.fn() }),
 }))
 vi.mock('@xyflow/react/dist/style.css', () => ({}))
 
@@ -49,6 +50,8 @@ describe('LiveView (non-standalone)', () => {
     vi.mocked(liveviewApi.load).mockReset()
     useCanvasStore.setState({ nodes: [], edges: [] })
   })
+
+  afterEach(() => { setSearch('') })
 
   // ── No key ────────────────────────────────────────────────────────────────
 
@@ -133,11 +136,25 @@ describe('LiveView (non-standalone)', () => {
 
 // ── Standalone mode ────────────────────────────────────────────────────────
 
+const XYFLOW_MOCK = {
+  ReactFlowProvider: ({ children }: { children: React.ReactNode }) => <>{children}</>,
+  ReactFlow: () => <div data-testid="react-flow" />,
+  Background: () => null,
+  Controls: () => null,
+  BackgroundVariant: { Dots: 'dots' },
+  ConnectionMode: { Loose: 'loose' },
+  useReactFlow: () => ({ fitView: vi.fn() }),
+}
+
 describe('LiveView (standalone — localStorage)', () => {
   beforeEach(() => {
     localStorage.clear()
     useCanvasStore.setState({ nodes: [], edges: [] })
-    vi.mocked(liveviewApi.load).mockReset()
+  })
+
+  afterEach(() => {
+    setSearch('')
+    vi.unstubAllEnvs()
   })
 
   it('loads canvas from localStorage without calling the API', async () => {
@@ -151,25 +168,12 @@ describe('LiveView (standalone — localStorage)', () => {
     }
     localStorage.setItem('homelable_canvas', JSON.stringify(stored))
 
-    // Stub VITE_STANDALONE before re-importing
     vi.stubEnv('VITE_STANDALONE', 'true')
     vi.resetModules()
-    const { default: LiveViewStandalone } = await import('../LiveView')
-
-    setSearch('')  // no key needed in standalone
-    render(<LiveViewStandalone />)
-
-    await waitFor(() => {
-      expect(screen.getByTestId('react-flow')).toBeDefined()
-    })
-    expect(liveviewApi.load).not.toHaveBeenCalled()
-
-    vi.unstubAllEnvs()
-  })
-
-  it('shows canvas (empty) when localStorage has no saved data', async () => {
-    vi.stubEnv('VITE_STANDALONE', 'true')
-    vi.resetModules()
+    const mockLoad = vi.fn()
+    vi.doMock('@xyflow/react', () => XYFLOW_MOCK)
+    vi.doMock('@xyflow/react/dist/style.css', () => ({}))
+    vi.doMock('@/api/client', () => ({ liveviewApi: { load: mockLoad } }))
     const { default: LiveViewStandalone } = await import('../LiveView')
 
     setSearch('')
@@ -178,8 +182,24 @@ describe('LiveView (standalone — localStorage)', () => {
     await waitFor(() => {
       expect(screen.getByTestId('react-flow')).toBeDefined()
     })
-    expect(liveviewApi.load).not.toHaveBeenCalled()
+    expect(mockLoad).not.toHaveBeenCalled()
+  })
 
-    vi.unstubAllEnvs()
+  it('shows canvas (empty) when localStorage has no saved data', async () => {
+    vi.stubEnv('VITE_STANDALONE', 'true')
+    vi.resetModules()
+    const mockLoad = vi.fn()
+    vi.doMock('@xyflow/react', () => XYFLOW_MOCK)
+    vi.doMock('@xyflow/react/dist/style.css', () => ({}))
+    vi.doMock('@/api/client', () => ({ liveviewApi: { load: mockLoad } }))
+    const { default: LiveViewStandalone } = await import('../LiveView')
+
+    setSearch('')
+    render(<LiveViewStandalone />)
+
+    await waitFor(() => {
+      expect(screen.getByTestId('react-flow')).toBeDefined()
+    })
+    expect(mockLoad).not.toHaveBeenCalled()
   })
 })

@@ -7,7 +7,7 @@ import { Label } from '@/components/ui/label'
 import { Select, SelectContent, SelectGroup, SelectItem, SelectLabel, SelectSeparator, SelectTrigger, SelectValue } from '@/components/ui/select'
 import { NODE_TYPE_LABELS, type NodeData, type NodeType, type CheckMethod } from '@/types'
 import { resolveNodeColors } from '@/utils/nodeColors'
-import { ICON_REGISTRY, ICON_CATEGORIES } from '@/utils/nodeIcons'
+import { ICON_REGISTRY, ICON_CATEGORIES, NODE_TYPE_DEFAULT_ICONS } from '@/utils/nodeIcons'
 
 const NODE_TYPE_GROUPS: { label: string; types: NodeType[] }[] = [
   { label: 'Hardware',       types: ['isp', 'router', 'switch', 'server', 'nas', 'ap', 'printer'] },
@@ -75,11 +75,11 @@ export function NodeModal({ open, onClose, onSubmit, initial, title = 'Add Node'
 
         <form onSubmit={handleSubmit} className="flex flex-col gap-4 mt-2">
           <div className="grid grid-cols-2 gap-3">
-            {/* Type */}
-            <div className="flex flex-col gap-1.5 col-span-2">
+            {/* Type + Icon on the same row */}
+            <div className="flex flex-col gap-1.5">
               <Label className="text-xs text-muted-foreground">Type</Label>
               <Select value={form.type} onValueChange={(v) => set('type', v as NodeType)}>
-                <SelectTrigger className="bg-[#21262d] border-[#30363d] text-sm h-8">
+                <SelectTrigger className="bg-[#21262d] border-[#30363d] text-sm h-8 w-full">
                   <SelectValue />
                 </SelectTrigger>
                 <SelectContent className="bg-[#21262d] border-[#30363d]">
@@ -103,7 +103,7 @@ export function NodeModal({ open, onClose, onSubmit, initial, title = 'Add Node'
             </div>
 
             {/* Icon */}
-            <div className="flex flex-col gap-1.5 col-span-2">
+            <div className="flex flex-col gap-1.5">
               <div className="flex items-center justify-between">
                 <Label className="text-xs text-muted-foreground">Icon</Label>
                 {form.custom_icon && (
@@ -120,69 +120,71 @@ export function NodeModal({ open, onClose, onSubmit, initial, title = 'Add Node'
               <button
                 type="button"
                 onClick={() => setIconPickerOpen((o) => !o)}
-                className="flex items-center justify-between gap-2 h-8 px-3 rounded-md bg-[#21262d] border border-[#30363d] text-sm hover:border-[#8b949e] transition-colors"
+                className="flex items-center justify-between gap-2 h-8 px-3 rounded-md bg-[#21262d] border border-[#30363d] text-sm hover:border-[#8b949e] transition-colors w-full"
               >
-                <span className="flex items-center gap-2">
+                <span className="flex items-center gap-2 min-w-0">
                   {(() => {
                     const entry = ICON_REGISTRY.find((e) => e.key === form.custom_icon)
                     if (entry) {
-                      return <>{createElement(entry.icon, { size: 13, className: 'text-[#00d4ff]' })}<span className="text-foreground">{entry.label}</span></>
+                      return <>{createElement(entry.icon, { size: 13, className: 'text-[#00d4ff] shrink-0' })}<span className="text-foreground truncate">{entry.label}</span></>
                     }
-                    return <span className="text-muted-foreground">Default (from type)</span>
+                    const defaultIcon = NODE_TYPE_DEFAULT_ICONS[form.type as NodeType] ?? NODE_TYPE_DEFAULT_ICONS.generic
+                    return <>{createElement(defaultIcon, { size: 13, className: 'text-muted-foreground shrink-0' })}<span className="text-muted-foreground truncate">Default</span></>
                   })()}
                 </span>
                 <ChevronDown size={12} className="text-muted-foreground shrink-0" style={{ transform: iconPickerOpen ? 'rotate(180deg)' : undefined, transition: 'transform 0.15s' }} />
               </button>
-              {/* Inline picker panel */}
-              {iconPickerOpen && (
-                <div className="flex flex-col gap-2 p-2.5 rounded-md bg-[#0d1117] border border-[#30363d]">
-                  <Input
-                    value={iconSearch}
-                    onChange={(e) => setIconSearch(e.target.value)}
-                    placeholder="Search icons…"
-                    className="bg-[#21262d] border-[#30363d] text-xs h-7"
-                    autoFocus
-                  />
-                  <div className="flex flex-col gap-2 max-h-52 overflow-y-auto">
-                    {ICON_CATEGORIES.map((cat) => {
-                      const entries = ICON_REGISTRY.filter(
-                        (e) => e.category === cat &&
-                          (iconSearch === '' || e.label.toLowerCase().includes(iconSearch.toLowerCase()) || e.key.includes(iconSearch.toLowerCase()))
-                      )
-                      if (entries.length === 0) return null
-                      return (
-                        <div key={cat}>
-                          <p className="text-[9px] font-semibold text-muted-foreground/50 uppercase tracking-wider mb-1">{cat}</p>
-                          <div className="grid grid-cols-7 gap-1">
-                            {entries.map((entry) => {
-                              const isSelected = form.custom_icon === entry.key
-                              return (
-                                <button
-                                  key={entry.key}
-                                  type="button"
-                                  title={entry.label}
-                                  onClick={() => { set('custom_icon', isSelected ? undefined : entry.key); setIconPickerOpen(false) }}
-                                  className="flex items-center justify-center w-7 h-7 rounded transition-colors"
-                                  style={{
-                                    background: isSelected ? '#00d4ff22' : 'transparent',
-                                    border: isSelected ? '1px solid #00d4ff88' : '1px solid transparent',
-                                    color: isSelected ? '#00d4ff' : '#8b949e',
-                                  }}
-                                  onMouseEnter={(e) => { if (!isSelected) (e.currentTarget as HTMLButtonElement).style.background = '#21262d' }}
-                                  onMouseLeave={(e) => { if (!isSelected) (e.currentTarget as HTMLButtonElement).style.background = 'transparent' }}
-                                >
-                                  {createElement(entry.icon, { size: 13 })}
-                                </button>
-                              )
-                            })}
-                          </div>
-                        </div>
-                      )
-                    })}
-                  </div>
-                </div>
-              )}
             </div>
+
+            {/* Inline icon picker — full width, shown below the type+icon row */}
+            {iconPickerOpen && (
+              <div className="flex flex-col gap-2 p-2.5 rounded-md bg-[#0d1117] border border-[#30363d] col-span-2">
+                <Input
+                  value={iconSearch}
+                  onChange={(e) => setIconSearch(e.target.value)}
+                  placeholder="Search icons…"
+                  className="bg-[#21262d] border-[#30363d] text-xs h-7"
+                  autoFocus
+                />
+                <div className="flex flex-col gap-2 max-h-52 overflow-y-auto">
+                  {ICON_CATEGORIES.map((cat) => {
+                    const entries = ICON_REGISTRY.filter(
+                      (e) => e.category === cat &&
+                        (iconSearch === '' || e.label.toLowerCase().includes(iconSearch.toLowerCase()) || e.key.includes(iconSearch.toLowerCase()))
+                    )
+                    if (entries.length === 0) return null
+                    return (
+                      <div key={cat}>
+                        <p className="text-[9px] font-semibold text-muted-foreground/50 uppercase tracking-wider mb-1">{cat}</p>
+                        <div className="grid grid-cols-7 gap-1">
+                          {entries.map((entry) => {
+                            const isSelected = form.custom_icon === entry.key
+                            return (
+                              <button
+                                key={entry.key}
+                                type="button"
+                                title={entry.label}
+                                onClick={() => { set('custom_icon', isSelected ? undefined : entry.key); setIconPickerOpen(false) }}
+                                className="flex items-center justify-center w-7 h-7 rounded transition-colors"
+                                style={{
+                                  background: isSelected ? '#00d4ff22' : 'transparent',
+                                  border: isSelected ? '1px solid #00d4ff88' : '1px solid transparent',
+                                  color: isSelected ? '#00d4ff' : '#8b949e',
+                                }}
+                                onMouseEnter={(e) => { if (!isSelected) (e.currentTarget as HTMLButtonElement).style.background = '#21262d' }}
+                                onMouseLeave={(e) => { if (!isSelected) (e.currentTarget as HTMLButtonElement).style.background = 'transparent' }}
+                              >
+                                {createElement(entry.icon, { size: 13 })}
+                              </button>
+                            )
+                          })}
+                        </div>
+                      </div>
+                    )
+                  })}
+                </div>
+              </div>
+            )}
 
             {/* Label */}
             <div className="flex flex-col gap-1.5 col-span-2">
@@ -411,6 +413,27 @@ export function NodeModal({ open, onClose, onSubmit, initial, title = 'Add Node'
                     </div>
                   </div>
                 )}
+              </div>
+            )}
+
+            {/* Bottom connection points (not for group containers) */}
+            {form.type !== 'groupRect' && form.type !== 'group' && (
+              <div className="flex flex-col gap-1.5 col-span-2">
+                <Label className="text-xs text-muted-foreground">Bottom Connection Points</Label>
+                <Select
+                  value={String(form.bottom_handles ?? 1)}
+                  onValueChange={(v) => set('bottom_handles', parseInt(v ?? '1', 10))}
+                >
+                  <SelectTrigger className="bg-[#21262d] border-[#30363d] text-sm h-8">
+                    <SelectValue />
+                  </SelectTrigger>
+                  <SelectContent className="bg-[#21262d] border-[#30363d]">
+                    <SelectItem value="1" className="text-sm">1 — center</SelectItem>
+                    <SelectItem value="2" className="text-sm">2 — left / right</SelectItem>
+                    <SelectItem value="3" className="text-sm">3 — left / center / right</SelectItem>
+                    <SelectItem value="4" className="text-sm">4 — evenly spaced</SelectItem>
+                  </SelectContent>
+                </Select>
               </div>
             )}
 

@@ -1,5 +1,5 @@
 import { useState, useCallback, useEffect, useRef } from 'react'
-import { Plus, Save, ScanLine, ChevronLeft, ChevronRight, LayoutDashboard, Clock, EyeOff, Trash2, RefreshCw, Loader2, Square, Eye, Settings, StopCircle } from 'lucide-react'
+import { Plus, Save, ScanLine, ChevronLeft, ChevronRight, LayoutDashboard, Clock, EyeOff, Trash2, RefreshCw, Loader2, Square, Eye, Settings, StopCircle, X } from 'lucide-react'
 import { Logo } from '@/components/ui/Logo'
 import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip'
 import { useCanvasStore } from '@/stores/canvasStore'
@@ -174,6 +174,16 @@ function PendingDevicesPanel({ onNodeApproved }: { onNodeApproved: (nodeId: stri
     }
   }, [])
 
+  const handleClearAll = async () => {
+    try {
+      await scanApi.clearPending()
+      setDevices([])
+      toast.success('Pending devices cleared')
+    } catch {
+      toast.error('Failed to clear pending devices')
+    }
+  }
+
   useEffect(() => { load() }, [load])
 
   useEffect(() => {
@@ -230,9 +240,16 @@ function PendingDevicesPanel({ onNodeApproved }: { onNodeApproved: (nodeId: stri
       <div className="p-2">
         <div className="flex items-center justify-between mb-2">
           <span className="text-xs font-medium text-muted-foreground uppercase tracking-wider">Pending</span>
-          <button onClick={load} className="text-muted-foreground hover:text-foreground p-0.5">
-            <RefreshCw size={12} />
-          </button>
+          <div className="flex items-center gap-1">
+            <button onClick={load} className="text-muted-foreground hover:text-foreground p-0.5" title="Refresh">
+              <RefreshCw size={12} />
+            </button>
+            {devices.length > 0 && (
+              <button onClick={handleClearAll} className="text-muted-foreground hover:text-[#f85149] p-0.5" title="Clear all pending">
+                <X size={12} />
+              </button>
+            )}
+          </div>
         </div>
         {loading && <Loader2 size={14} className="animate-spin text-muted-foreground mx-auto my-4" />}
         {!loading && devices.length === 0 && (
@@ -252,6 +269,8 @@ function PendingDevicesPanel({ onNodeApproved }: { onNodeApproved: (nodeId: stri
           const hasHttps = d.services.some((s) => s.port === 443)
           const otherCount = d.services.filter((s) => s.port !== 22 && s.port !== 80 && s.port !== 443).length
           const virtualBadge = detectVirtualBadge(d.mac)
+          const sourceColor = d.discovery_source === 'mdns' ? '#a855f7' : '#8b949e'
+          const sourceLabel = d.discovery_source === 'mdns' ? 'mDNS' : d.discovery_source === 'arp' ? 'ARP' : null
           return (
             <button
               key={d.id}
@@ -265,8 +284,9 @@ function PendingDevicesPanel({ onNodeApproved }: { onNodeApproved: (nodeId: stri
               {showIpBelow && (
                 <div className="font-mono text-muted-foreground truncate pl-3 text-[10px] mt-0.5">{d.ip}</div>
               )}
-              {(hasSsh || hasHttp || hasHttps || otherCount > 0 || virtualBadge) && (
+              {(hasSsh || hasHttp || hasHttps || otherCount > 0 || virtualBadge || sourceLabel) && (
                 <div className="flex items-center gap-1 pl-3 mt-1.5 flex-wrap">
+                  {sourceLabel && <ServiceBadge label={sourceLabel} color={sourceColor} />}
                   {virtualBadge && (
                     <Tooltip>
                       <TooltipTrigger>

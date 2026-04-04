@@ -82,6 +82,7 @@ export interface NodeData extends Record<string, unknown> {
     height?: number
   }
   custom_icon?: string
+  bottom_handles?: number
 }
 
 export type EdgePathStyle = 'bezier' | 'smooth'

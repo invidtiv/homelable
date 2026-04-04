@@ -13,6 +13,7 @@ class PendingDeviceResponse(BaseModel):
     services: list[Any]
     suggested_type: str | None
     status: str
+    discovery_source: str | None
     discovered_at: datetime
 
     model_config = {"from_attributes": True}

@@ -29,6 +29,7 @@ class NodeBase(BaseModel):
     show_hardware: bool = False
     width: float | None = None
     height: float | None = None
+    bottom_handles: int = 1
 
 
 class NodeCreate(NodeBase):
@@ -60,6 +61,7 @@ class NodeUpdate(BaseModel):
     show_hardware: bool | None = None
     width: float | None = None
     height: float | None = None
+    bottom_handles: int | None = None
 
 
 class NodeResponse(NodeBase):

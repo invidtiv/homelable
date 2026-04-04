@@ -3,10 +3,12 @@ import uuid
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
+from sqlalchemy import select as sa_select
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
+from sqlalchemy.pool import StaticPool
 
 from app.db.database import Base
-from app.db.models import PendingDevice, ScanRun
+from app.db.models import Node, PendingDevice, ScanRun
 
 # ---------------------------------------------------------------------------
 # Helpers
@@ -18,7 +20,11 @@ def _make_run_id() -> str:
 
 @pytest.fixture
 async def mem_db():
-    engine = create_async_engine("sqlite+aiosqlite:///:memory:")
+    engine = create_async_engine(
+        "sqlite+aiosqlite:///:memory:",
+        connect_args={"check_same_thread": False},
+        poolclass=StaticPool,
+    )
     async with engine.begin() as conn:
         await conn.run_sync(Base.metadata.create_all)
     factory = async_sessionmaker(engine, class_=AsyncSession, expire_on_commit=False)
@@ -31,138 +37,244 @@ def _make_scan_run(run_id: str) -> ScanRun:
 
 
 # ---------------------------------------------------------------------------
-# _nmap_arp_sweep
+# _ping_sweep
 # ---------------------------------------------------------------------------
 
-def test_nmap_arp_sweep_returns_alive_hosts():
-    from app.services.scanner import _nmap_arp_sweep
+@pytest.mark.asyncio
+async def test_ping_sweep_returns_alive_hosts():
+    from app.services.scanner import _ping_sweep
 
-    mock_nm = MagicMock()
-    mock_nm.all_hosts.return_value = ["192.168.1.1", "192.168.1.2"]
-    mock_nm.__getitem__ = lambda self, host: MagicMock(
-        state=lambda: "up",
-        get=lambda key, default=None: {"mac": "aa:bb:cc:dd:ee:ff"} if key == "addresses" else default,
-    )
+    async def fake_ping(ip: str) -> str | None:
+        return ip if ip in {"192.168.1.1", "192.168.1.2"} else None
 
-    with patch("app.services.scanner.nmap.PortScanner", return_value=mock_nm), \
+    with patch("app.services.scanner._ping_sweep", wraps=None):
+        pass  # just ensure import is fine
+
+    # Patch asyncio.create_subprocess_exec to simulate ping responses
+    responding = {"192.168.1.1", "192.168.1.2"}
+
+    async def mock_subprocess(*args, **kwargs):
+        ip = args[-1]
+        proc = MagicMock()
+        proc.returncode = 0 if ip in responding else 1
+        proc.wait = AsyncMock(return_value=proc.returncode)
+        return proc
+
+    with patch("asyncio.create_subprocess_exec", side_effect=mock_subprocess), \
+         patch("app.services.scanner._arp_table_hosts", return_value={}), \
          patch("app.services.scanner._resolve_hostname", return_value=None):
-        result = _nmap_arp_sweep("192.168.1.0/24")
+        result = await _ping_sweep("192.168.1.0/30")  # .1 .2 only in /30
 
-    assert set(result.keys()) == {"192.168.1.1", "192.168.1.2"}
+    assert "192.168.1.1" in result
+    assert "192.168.1.2" in result
     for host in result.values():
-        assert host["open_ports"] == []  # empty until phase 2
+        assert host["open_ports"] == []
 
 
-def test_nmap_arp_sweep_skips_down_hosts():
-    from app.services.scanner import _nmap_arp_sweep
+@pytest.mark.asyncio
+async def test_ping_sweep_excludes_non_responding():
+    from app.services.scanner import _ping_sweep
 
-    states = {"192.168.1.1": "up", "192.168.1.2": "down"}
+    async def mock_subprocess(*args, **kwargs):
+        ip = args[-1]
+        proc = MagicMock()
+        proc.returncode = 0 if ip == "192.168.1.1" else 1
+        proc.wait = AsyncMock(return_value=proc.returncode)
+        return proc
 
-    mock_nm = MagicMock()
-    mock_nm.all_hosts.return_value = list(states.keys())
-
-    def getitem(host):
-        m = MagicMock()
-        m.state.return_value = states[host]
-        m.get.return_value = {}
-        return m
-
-    mock_nm.__getitem__ = lambda self, host: getitem(host)
-
-    with patch("app.services.scanner.nmap.PortScanner", return_value=mock_nm), \
+    with patch("asyncio.create_subprocess_exec", side_effect=mock_subprocess), \
+         patch("app.services.scanner._arp_table_hosts", return_value={}), \
          patch("app.services.scanner._resolve_hostname", return_value=None):
-        result = _nmap_arp_sweep("192.168.1.0/24")
+        result = await _ping_sweep("192.168.1.0/30")
 
     assert "192.168.1.1" in result
     assert "192.168.1.2" not in result
 
 
-# ---------------------------------------------------------------------------
-# _nmap_port_scan
-# ---------------------------------------------------------------------------
+@pytest.mark.asyncio
+async def test_ping_sweep_supplements_with_arp_cache():
+    """Devices that block ICMP but appear in ARP cache should still be discovered."""
+    from app.services.scanner import _ping_sweep
 
-def test_nmap_port_scan_merges_ports():
-    from app.services.scanner import _nmap_port_scan
+    async def mock_subprocess(*args, **kwargs):
+        proc = MagicMock()
+        proc.returncode = 1  # all pings fail
+        proc.wait = AsyncMock(return_value=1)
+        return proc
 
-    alive = {
-        "192.168.1.10": {"ip": "192.168.1.10", "hostname": None, "mac": None, "os": None, "open_ports": []},
+    arp_extra = {
+        "192.168.1.10": {"ip": "192.168.1.10", "mac": "aa:bb:cc:dd:ee:10", "hostname": None, "os": None, "open_ports": []},
     }
+
+    with patch("asyncio.create_subprocess_exec", side_effect=mock_subprocess), \
+         patch("app.services.scanner._arp_table_hosts", return_value=arp_extra), \
+         patch("app.services.scanner._resolve_hostname", return_value=None):
+        result = await _ping_sweep("192.168.1.0/24")
+
+    assert "192.168.1.10" in result
+    assert result["192.168.1.10"]["mac"] == "aa:bb:cc:dd:ee:10"
+
+
+@pytest.mark.asyncio
+async def test_ping_sweep_enriches_mac_from_arp_cache():
+    """Ping-alive hosts with no ARP entry get their MAC from the ARP cache."""
+    from app.services.scanner import _ping_sweep
+
+    async def mock_subprocess(*args, **kwargs):
+        ip = args[-1]
+        proc = MagicMock()
+        proc.returncode = 0 if ip == "192.168.1.1" else 1
+        proc.wait = AsyncMock(return_value=proc.returncode)
+        return proc
+
+    arp_extra = {
+        "192.168.1.1": {"ip": "192.168.1.1", "mac": "de:ad:be:ef:00:01", "hostname": None, "os": None, "open_ports": []},
+    }
+
+    with patch("asyncio.create_subprocess_exec", side_effect=mock_subprocess), \
+         patch("app.services.scanner._arp_table_hosts", return_value=arp_extra), \
+         patch("app.services.scanner._resolve_hostname", return_value=None):
+        result = await _ping_sweep("192.168.1.0/30")
+
+    assert result["192.168.1.1"]["mac"] == "de:ad:be:ef:00:01"
+
+
+# ---------------------------------------------------------------------------
+# _arp_table_hosts
+# ---------------------------------------------------------------------------
+
+def test_arp_table_hosts_parses_proc_net_arp():
+    import io  # noqa: PLC0415
+
+    from app.services.scanner import _arp_table_hosts
+
+    arp_content = (
+        "IP address       HW type     Flags       HW address            Mask     Device\n"
+        "192.168.1.1      0x1         0x2         aa:bb:cc:dd:ee:01     *        eth0\n"
+        "192.168.1.50     0x1         0x2         aa:bb:cc:dd:ee:02     *        eth0\n"
+        "10.0.0.1         0x1         0x2         aa:bb:cc:dd:ee:03     *        eth0\n"  # outside subnet
+        "192.168.1.99     0x1         0x2         00:00:00:00:00:00     *        eth0\n"  # incomplete
+    )
+
+    mock_file = MagicMock()
+    mock_file.__enter__ = MagicMock(return_value=io.StringIO(arp_content))
+    mock_file.__exit__ = MagicMock(return_value=False)
+
+    with patch("builtins.open", return_value=mock_file), \
+         patch("app.services.scanner._resolve_hostname", return_value=None):
+        result = _arp_table_hosts("192.168.1.0/24")
+
+    assert "192.168.1.1" in result
+    assert "192.168.1.50" in result
+    assert "10.0.0.1" not in result   # outside target subnet
+    assert "192.168.1.99" not in result  # zero MAC skipped
+
+
+def test_arp_table_hosts_parses_macos_arp_output():
+    from app.services.scanner import _arp_table_hosts
+
+    arp_output = (
+        "router.lan (192.168.1.1) at aa:bb:cc:dd:ee:01 on en0 ifscope [ethernet]\n"
+        "device.lan (192.168.1.20) at aa:bb:cc:dd:ee:02 on en0 ifscope [ethernet]\n"
+        "? (192.168.1.99) at (incomplete) on en0 ifscope [ethernet]\n"
+        "? (10.0.0.1) at aa:bb:cc:dd:ee:04 on en0 ifscope [ethernet]\n"  # outside subnet
+    )
+
+    mock_result = MagicMock()
+    mock_result.stdout = arp_output
+
+    with patch("builtins.open", side_effect=FileNotFoundError), \
+         patch("subprocess.run", return_value=mock_result), \
+         patch("app.services.scanner._resolve_hostname", return_value=None):
+        result = _arp_table_hosts("192.168.1.0/24")
+
+    assert "192.168.1.1" in result
+    assert "192.168.1.20" in result
+    assert "192.168.1.99" not in result   # incomplete MAC
+    assert "10.0.0.1" not in result       # outside subnet
+
+
+# ---------------------------------------------------------------------------
+# _nmap_scan_single (Phase 2 per-IP worker)
+# ---------------------------------------------------------------------------
+
+def test_nmap_scan_single_detects_open_ports():
+    from app.services.scanner import _nmap_scan_single
+
+    host = {"ip": "192.168.1.10", "hostname": None, "mac": None, "os": None, "open_ports": []}
+
+    # Build a realistic host entry: protocols → ports → port info
+    port_info = {80: {"state": "open", "product": "nginx", "version": "1.24"}}
+    mock_host = MagicMock()
+    mock_host.all_protocols.return_value = ["tcp"]
+    mock_host.__getitem__ = MagicMock(return_value=port_info)
+    mock_host.get.return_value = {}
 
     mock_nm = MagicMock()
     mock_nm.all_hosts.return_value = ["192.168.1.10"]
-    mock_nm.__getitem__ = lambda self, host: MagicMock(
-        all_protocols=lambda: ["tcp"],
-        **{"__getitem__": lambda self2, proto: {
-            80: {"state": "open", "product": "nginx", "version": "1.24"},
-        }},
-        get=lambda key, default=None: default,
-    )
+    mock_nm.__getitem__ = MagicMock(return_value=mock_host)
 
     with patch("app.services.scanner.nmap.PortScanner", return_value=mock_nm), \
          patch("app.services.scanner._extract_os", return_value=None):
-        result = _nmap_port_scan(alive)
+        result = _nmap_scan_single(host)
 
-    assert len(result) == 1
-    assert result[0]["open_ports"][0]["port"] == 80
+    assert len(result["open_ports"]) == 1
+    assert result["open_ports"][0]["port"] == 80
+    assert result["open_ports"][0]["banner"] == "nginx 1.24"
 
 
-def test_nmap_port_scan_returns_arp_only_on_failure():
-    from app.services.scanner import _nmap_port_scan
+def test_nmap_scan_single_returns_host_unchanged_on_error():
+    from app.services.scanner import _nmap_scan_single
 
-    alive = {
-        "192.168.1.20": {"ip": "192.168.1.20", "hostname": None, "mac": None, "os": None, "open_ports": []},
-    }
-
+    host = {"ip": "192.168.1.20", "hostname": None, "mac": None, "os": None, "open_ports": []}
     mock_nm = MagicMock()
     mock_nm.scan.side_effect = Exception("nmap error")
 
     with patch("app.services.scanner.nmap.PortScanner", return_value=mock_nm):
-        result = _nmap_port_scan(alive)
+        result = _nmap_scan_single(host)
 
-    # Should return the ARP-found host even though port scan failed
-    assert len(result) == 1
-    assert result[0]["ip"] == "192.168.1.20"
-    assert result[0]["open_ports"] == []
+    assert result["ip"] == "192.168.1.20"
+    assert result["open_ports"] == []
 
 
-def test_nmap_port_scan_includes_hosts_with_no_open_ports():
-    """IoT devices found by ARP but with no open TCP ports must still be returned."""
-    from app.services.scanner import _nmap_port_scan
+def test_nmap_scan_single_returns_host_unchanged_when_no_results():
+    """Host confirmed alive in Phase 1 but all ports filtered — keep it with empty ports."""
+    from app.services.scanner import _nmap_scan_single
 
-    alive = {
-        "192.168.1.30": {"ip": "192.168.1.30", "hostname": "shelly1.lan", "mac": "34:94:54:aa:bb:cc", "os": None, "open_ports": []},
-        "192.168.1.31": {"ip": "192.168.1.31", "hostname": None, "mac": None, "os": None, "open_ports": []},
-    }
-
-    # Port scan returns only 192.168.1.31 (e.g., .30 filtered all ports)
+    host = {"ip": "192.168.1.30", "hostname": "shelly1.lan", "mac": "34:94:54:aa:bb:cc", "os": None, "open_ports": []}
     mock_nm = MagicMock()
-    mock_nm.all_hosts.return_value = ["192.168.1.31"]
-    mock_nm.__getitem__ = lambda self, host: MagicMock(
-        all_protocols=lambda: [],
-        get=lambda key, default=None: default,
-    )
+    mock_nm.all_hosts.return_value = []  # no results
 
-    with patch("app.services.scanner.nmap.PortScanner", return_value=mock_nm), \
-         patch("app.services.scanner._extract_os", return_value=None):
-        result = _nmap_port_scan(alive)
+    with patch("app.services.scanner.nmap.PortScanner", return_value=mock_nm):
+        result = _nmap_scan_single(host)
 
-    ips = {h["ip"] for h in result}
-    assert "192.168.1.30" in ips, "ARP-found device with no open ports must still be returned"
-    assert "192.168.1.31" in ips
+    assert result["ip"] == "192.168.1.30"
+    assert result["open_ports"] == []
+    assert result["mac"] == "34:94:54:aa:bb:cc"  # preserved from Phase 1
 
 
 # ---------------------------------------------------------------------------
-# _nmap_scan (integration of both phases)
+# _nmap_scan
 # ---------------------------------------------------------------------------
 
-def test_nmap_scan_uses_mock_when_nmap_unavailable():
+@pytest.mark.asyncio
+async def test_nmap_scan_uses_mock_when_nmap_unavailable():
     from app.services.scanner import _nmap_scan
 
     with patch("app.services.scanner._NMAP_AVAILABLE", False):
-        result = _nmap_scan("192.168.1.0/24")
+        result = await _nmap_scan("192.168.1.0/24")
 
     assert len(result) == 1
     assert result[0]["ip"] == "192.168.1.99"
+
+
+@pytest.mark.asyncio
+async def test_nmap_scan_raises_on_sweep_error():
+    from app.services.scanner import _nmap_scan
+
+    with patch("app.services.scanner._ping_sweep", side_effect=Exception("ping sweep failed")), \
+         pytest.raises(RuntimeError, match="ping sweep failed"):
+        await _nmap_scan("192.168.1.0/24")
 
 
 # ---------------------------------------------------------------------------
@@ -224,6 +336,47 @@ async def test_mdns_discover_returns_devices():
 
 
 # ---------------------------------------------------------------------------
+# _nmap_port_scan (Phase 2 concurrency)
+# ---------------------------------------------------------------------------
+
+@pytest.mark.asyncio
+async def test_nmap_port_scan_returns_empty_when_no_alive_hosts():
+    from app.services.scanner import _nmap_port_scan
+
+    result = await _nmap_port_scan({})
+    assert result == []
+
+
+@pytest.mark.asyncio
+async def test_nmap_port_scan_tolerates_single_host_exception():
+    """A single per-host failure should not abort the entire Phase 2 gather."""
+    from app.services.scanner import _nmap_port_scan
+
+    hosts = {
+        "192.168.1.1": {"ip": "192.168.1.1", "hostname": None, "mac": None, "os": None, "open_ports": []},
+        "192.168.1.2": {"ip": "192.168.1.2", "hostname": None, "mac": None, "os": None, "open_ports": []},
+    }
+
+    call_count = 0
+
+    def _flaky_scan(host_dict):
+        nonlocal call_count
+        call_count += 1
+        if host_dict["ip"] == "192.168.1.1":
+            raise RuntimeError("simulated nmap crash")
+        return host_dict
+
+    with patch("app.services.scanner._nmap_scan_single", side_effect=_flaky_scan), \
+         patch("app.services.scanner._NMAP_AVAILABLE", True):
+        result = await _nmap_port_scan(hosts)
+
+    assert call_count == 2
+    # The crashing host is dropped; the healthy one survives
+    assert len(result) == 1
+    assert result[0]["ip"] == "192.168.1.2"
+
+
+# ---------------------------------------------------------------------------
 # run_scan integration
 # ---------------------------------------------------------------------------
 
@@ -245,9 +398,7 @@ async def test_run_scan_adds_nmap_devices_as_pending(mem_db):
             await run_scan(["192.168.1.0/24"], session, run_id)
 
     async with mem_db() as session:
-        result = await session.execute(
-            __import__("sqlalchemy", fromlist=["select"]).select(PendingDevice)
-        )
+        result = await session.execute(sa_select(PendingDevice))
         devices = result.scalars().all()
 
     assert any(d.ip == "192.168.1.5" for d in devices)
@@ -272,12 +423,12 @@ async def test_run_scan_mdns_only_device_added(mem_db):
             await run_scan(["192.168.1.0/24"], session, run_id)
 
     async with mem_db() as session:
-        from sqlalchemy import select as sa_select
         result = await session.execute(sa_select(PendingDevice).where(PendingDevice.ip == "192.168.1.80"))
         device = result.scalar_one_or_none()
 
     assert device is not None
     assert device.status == "pending"
+    assert device.discovery_source == "mdns"
 
 
 @pytest.mark.asyncio
@@ -299,8 +450,86 @@ async def test_run_scan_mdns_skipped_if_already_in_nmap(mem_db):
             await run_scan(["192.168.1.0/24"], session, run_id)
 
     async with mem_db() as session:
-        from sqlalchemy import select as sa_select
         result = await session.execute(sa_select(PendingDevice).where(PendingDevice.ip == "192.168.1.10"))
         devices = result.scalars().all()
 
     assert len(devices) == 1  # not duplicated
+
+
+@pytest.mark.asyncio
+async def test_run_scan_skips_canvas_nodes(mem_db):
+    """Hosts already approved onto the canvas must be skipped."""
+    from app.services.scanner import run_scan
+
+    run_id = _make_run_id()
+    async with mem_db() as session:
+        session.add(_make_scan_run(run_id))
+        canvas_node = Node(
+            id=str(uuid.uuid4()), label="PVE", type="proxmox",
+            ip="192.168.1.100", status="online",
+        )
+        session.add(canvas_node)
+        await session.commit()
+
+    nmap_hosts = [{"ip": "192.168.1.100", "hostname": "pve.lan", "mac": None, "os": None, "open_ports": []}]
+
+    async with mem_db() as session:
+        with patch("app.services.scanner._nmap_scan", return_value=nmap_hosts), \
+             patch("app.services.scanner._mdns_discover", new_callable=AsyncMock, return_value=[]), \
+             patch("app.api.routes.status.broadcast_scan_update", new_callable=AsyncMock):
+            await run_scan(["192.168.1.0/24"], session, run_id)
+
+    async with mem_db() as session:
+        result = await session.execute(sa_select(PendingDevice).where(PendingDevice.ip == "192.168.1.100"))
+        assert result.scalar_one_or_none() is None
+
+
+@pytest.mark.asyncio
+async def test_run_scan_skips_hidden_devices(mem_db):
+    """Hosts hidden by the user must not re-appear in pending."""
+    from app.services.scanner import run_scan
+
+    run_id = _make_run_id()
+    async with mem_db() as session:
+        session.add(_make_scan_run(run_id))
+        hidden = PendingDevice(ip="192.168.1.55", status="hidden")
+        session.add(hidden)
+        await session.commit()
+
+    nmap_hosts = [{"ip": "192.168.1.55", "hostname": None, "mac": None, "os": None, "open_ports": []}]
+
+    async with mem_db() as session:
+        with patch("app.services.scanner._nmap_scan", return_value=nmap_hosts), \
+             patch("app.services.scanner._mdns_discover", new_callable=AsyncMock, return_value=[]), \
+             patch("app.api.routes.status.broadcast_scan_update", new_callable=AsyncMock):
+            await run_scan(["192.168.1.0/24"], session, run_id)
+
+    async with mem_db() as session:
+        result = await session.execute(
+            sa_select(PendingDevice).where(PendingDevice.ip == "192.168.1.55", PendingDevice.status == "pending")
+        )
+        assert result.scalar_one_or_none() is None
+
+
+@pytest.mark.asyncio
+async def test_run_scan_cancelled_marks_status_cancelled(mem_db):
+    """Cancelling a running scan sets the ScanRun status to 'cancelled'."""
+    from app.services.scanner import request_cancel, run_scan
+
+    run_id = _make_run_id()
+    async with mem_db() as session:
+        session.add(_make_scan_run(run_id))
+        await session.commit()
+
+    request_cancel(run_id)
+
+    async with mem_db() as session:
+        with patch("app.services.scanner._nmap_scan", return_value=[]), \
+             patch("app.services.scanner._mdns_discover", new_callable=AsyncMock, return_value=[]), \
+             patch("app.api.routes.status.broadcast_scan_update", new_callable=AsyncMock):
+            await run_scan(["192.168.1.0/24"], session, run_id)
+
+    async with mem_db() as session:
+        run = await session.get(ScanRun, run_id)
+        assert run is not None
+        assert run.status == "cancelled"

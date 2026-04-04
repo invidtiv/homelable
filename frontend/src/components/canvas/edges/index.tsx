@@ -26,7 +26,7 @@ export function HomelableEdge({ id, source, target, sourceX, sourceY, targetX, t
   const isBidirectional = sourceType === 'proxmox' && targetType === 'proxmox'
 
   const pathArgs = { sourceX, sourceY, sourcePosition, targetX, targetY, targetPosition }
-  const [edgePath, labelX, labelY] = data?.path_style === 'smooth'
+  const [edgePath, labelX] = data?.path_style === 'smooth'
     ? getSmoothStepPath({ ...pathArgs, borderRadius: 8 })
     : getBezierPath(pathArgs)
 
@@ -95,9 +95,9 @@ export function HomelableEdge({ id, source, target, sourceX, sourceY, targetX, t
       {data?.label && (
         <EdgeLabelRenderer>
           <div
-            className="absolute pointer-events-none font-mono text-[10px] px-1 rounded"
+            className="absolute pointer-events-none font-mono text-[10px] px-1.5 py-0.5 rounded"
             style={{
-              transform: `translate(-50%, -50%) translate(${labelX}px, ${labelY}px)`,
+              transform: `translate(-50%, -50%) translate(${labelX}px, ${(sourceY + targetY) / 2}px)`,
               background: theme.colors.edgeLabelBackground,
               color:      theme.colors.edgeLabelColor,
               border:     `1px solid ${theme.colors.edgeLabelBorder}`,

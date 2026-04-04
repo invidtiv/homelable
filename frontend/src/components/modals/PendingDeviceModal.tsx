@@ -19,6 +19,7 @@ export interface PendingDevice {
   services: Service[]
   suggested_type: string | null
   status: string
+  discovery_source: string | null
   discovered_at: string
 }
 
@@ -100,6 +101,9 @@ export function PendingDeviceModal({ device, onClose, onApprove, onHide, onIgnor
             {device.os && <InfoRow label="OS" value={device.os} />}
             {device.suggested_type && (
               <InfoRow label="Type" value={device.suggested_type} />
+            )}
+            {device.discovery_source && (
+              <InfoRow label="Source" value={device.discovery_source.toUpperCase()} />
             )}
             <InfoRow label="Discovered" value={new Date(device.discovered_at).toLocaleString()} />
           </div>

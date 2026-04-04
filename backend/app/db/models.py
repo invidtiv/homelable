@@ -44,6 +44,7 @@ class Node(Base):
     show_hardware: Mapped[bool] = mapped_column(Boolean, default=False)
     width: Mapped[float | None] = mapped_column(Float, nullable=True)
     height: Mapped[float | None] = mapped_column(Float, nullable=True)
+    bottom_handles: Mapped[int] = mapped_column(Integer, default=1)
     last_seen: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
     response_time_ms: Mapped[int | None] = mapped_column(Integer)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_now)
@@ -90,6 +91,7 @@ class PendingDevice(Base):
     services: Mapped[list[Any]] = mapped_column(JSON, default=list)
     suggested_type: Mapped[str | None] = mapped_column(String)
     status: Mapped[str] = mapped_column(String, default="pending")
+    discovery_source: Mapped[str | None] = mapped_column(String)
     discovered_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_now)
 
 

@@ -322,7 +322,8 @@ async def test_stop_scan_requires_auth(client: AsyncClient):
 
 @pytest.mark.asyncio
 async def test_stop_scan_not_found(client: AsyncClient, headers):
-    res = await client.post("/api/v1/scan/nonexistent-id/stop", headers=headers)
+    import uuid as _uuid
+    res = await client.post(f"/api/v1/scan/{_uuid.uuid4()}/stop", headers=headers)
     assert res.status_code == 404
 
 

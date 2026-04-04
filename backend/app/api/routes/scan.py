@@ -1,8 +1,10 @@
+import ipaddress
 import logging
+import uuid
 from typing import Any
 
 from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException
-from pydantic import BaseModel
+from pydantic import BaseModel, field_validator
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -17,6 +19,16 @@ from app.services.scanner import request_cancel, run_scan
 
 class ScanConfig(BaseModel):
     ranges: list[str]
+
+    @field_validator("ranges")
+    @classmethod
+    def validate_cidr(cls, v: list[str]) -> list[str]:
+        for r in v:
+            try:
+                ipaddress.ip_network(r, strict=False)
+            except ValueError as exc:
+                raise ValueError(f"Invalid CIDR range: {r!r}") from exc
+        return v
 
 
 logger = logging.getLogger(__name__)
@@ -49,6 +61,10 @@ async def stop_scan(
     db: AsyncSession = Depends(get_db),
     _: str = Depends(get_current_user),
 ) -> dict[str, bool]:
+    try:
+        uuid.UUID(run_id)
+    except ValueError:
+        raise HTTPException(status_code=400, detail="Invalid run_id format") from None
     run = await db.get(ScanRun, run_id)
     if not run:
         raise HTTPException(status_code=404, detail="Scan run not found")
@@ -62,6 +78,19 @@ async def stop_scan(
 async def list_pending(db: AsyncSession = Depends(get_db), _: str = Depends(get_current_user)) -> list[PendingDevice]:
     result = await db.execute(select(PendingDevice).where(PendingDevice.status == "pending"))
     return list(result.scalars().all())
+
+
+@router.delete("/pending", response_model=dict)
+async def clear_pending(
+    db: AsyncSession = Depends(get_db),
+    _: str = Depends(get_current_user),
+) -> dict[str, int]:
+    result = await db.execute(select(PendingDevice).where(PendingDevice.status == "pending"))
+    devices = result.scalars().all()
+    for device in devices:
+        await db.delete(device)
+    await db.commit()
+    return {"deleted": len(devices)}
 
 
 @router.get("/hidden", response_model=list[PendingDeviceResponse])
@@ -92,9 +121,10 @@ async def hide_device(
     device_id: str, db: AsyncSession = Depends(get_db), _: str = Depends(get_current_user)
 ) -> dict[str, bool]:
     device = await db.get(PendingDevice, device_id)
-    if device:
-        device.status = "hidden"
-        await db.commit()
+    if not device:
+        raise HTTPException(status_code=404, detail="Device not found")
+    device.status = "hidden"
+    await db.commit()
     return {"hidden": True}
 
 
@@ -103,9 +133,10 @@ async def ignore_device(
     device_id: str, db: AsyncSession = Depends(get_db), _: str = Depends(get_current_user)
 ) -> dict[str, bool]:
     device = await db.get(PendingDevice, device_id)
-    if device:
-        await db.delete(device)
-        await db.commit()
+    if not device:
+        raise HTTPException(status_code=404, detail="Device not found")
+    await db.delete(device)
+    await db.commit()
     return {"ignored": True}
 
 
@@ -127,4 +158,5 @@ async def update_scan_config(payload: ScanConfig, _: str = Depends(get_current_u
         settings.save_overrides()
         return payload
     except Exception as exc:
-        raise HTTPException(status_code=500, detail=str(exc)) from exc
+        logger.error("Failed to save scan config: %s", exc)
+        raise HTTPException(status_code=500, detail="Failed to save scan config") from exc

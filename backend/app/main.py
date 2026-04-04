@@ -1,3 +1,5 @@
+import logging
+import logging.config
 from collections.abc import AsyncGenerator
 from contextlib import asynccontextmanager
 from typing import Any
@@ -14,6 +16,16 @@ from app.db.database import init_db
 
 @asynccontextmanager
 async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
+    # Ensure app logs are visible: attach a handler to the root logger if none
+    # exists (uvicorn only installs handlers on its own loggers, not the root).
+    root_logger = logging.getLogger()
+    if not root_logger.handlers:
+        handler = logging.StreamHandler()
+        handler.setFormatter(logging.Formatter("%(levelname)s:%(name)s:%(message)s"))
+        root_logger.addHandler(handler)
+    root_logger.setLevel(logging.INFO)
+    logging.getLogger("app").setLevel(logging.INFO)
+    logging.getLogger("app.services.scanner").setLevel(logging.INFO)
     await init_db()
     settings.load_overrides()
     start_scheduler()

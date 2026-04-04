@@ -1,3 +1,4 @@
+import type { NodeType } from '@/types'
 import {
   // Infrastructure (node types)
   Globe, Router, Network, Server, Layers, Box, Container, HardDrive, Cpu, Wifi, Circle,
@@ -115,6 +116,27 @@ export const ICON_CATEGORIES = [...new Set(ICON_REGISTRY.map((e) => e.category))
 export const ICON_MAP: Record<string, LucideIcon> = Object.fromEntries(
   ICON_REGISTRY.map((e) => [e.key, e.icon]),
 )
+
+export const NODE_TYPE_DEFAULT_ICONS: Record<NodeType, LucideIcon> = {
+  isp:      Globe,
+  router:   Router,
+  switch:   Network,
+  server:   Server,
+  proxmox:  Layers,
+  vm:       Box,
+  lxc:      Container,
+  nas:      HardDrive,
+  iot:      Cpu,
+  ap:       Wifi,
+  camera:   Cctv,
+  printer:  Printer,
+  computer: Monitor,
+  cpl:      PlugZap,
+  docker:   Anchor,
+  generic:  Circle,
+  group:    Circle,
+  groupRect: Circle,
+}
 
 /** Resolve the display icon for a node — custom_icon takes priority over type default. */
 export function resolveNodeIcon(

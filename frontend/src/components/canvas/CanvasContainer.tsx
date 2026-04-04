@@ -1,4 +1,4 @@
-import { useCallback, useState } from 'react'
+import { useCallback, useEffect, useState } from 'react'
 import {
   ReactFlow,
   Background,
@@ -7,6 +7,7 @@ import {
   BackgroundVariant,
   ConnectionMode,
   SelectionMode,
+  useReactFlow,
   type Node,
   type Edge,
   type Connection,
@@ -33,7 +34,19 @@ export function CanvasContainer({ onConnect: onConnectProp, onEdgeDoubleClick, o
     nodes, edges,
     onNodesChange, onEdgesChange,
     setSelectedNode, snapshotHistory,
+    fitViewPending, clearFitViewPending,
   } = useCanvasStore()
+  const { fitView } = useReactFlow()
+
+  // Fit view after canvas loads (fitViewPending is set by loadCanvas)
+  useEffect(() => {
+    if (!fitViewPending || nodes.length === 0) return
+    const id = setTimeout(() => {
+      fitView({ padding: 0.12, duration: 350 })
+      clearFitViewPending()
+    }, 50)
+    return () => clearTimeout(id)
+  }, [fitViewPending, nodes.length, fitView, clearFitViewPending])
 
   const activeTheme = useThemeStore((s) => s.activeTheme)
   const theme = THEMES[activeTheme]
@@ -77,7 +90,6 @@ export function CanvasContainer({ onConnect: onConnectProp, onEdgeDoubleClick, o
         multiSelectionKeyCode={['Meta', 'Control']}
         snapToGrid
         snapGrid={[16, 16]}
-        fitView
         colorMode={theme.colors.reactFlowColorMode}
         elevateNodesOnSelect={false}
         connectionMode={ConnectionMode.Loose}

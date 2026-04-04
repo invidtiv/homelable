@@ -1,5 +1,6 @@
 import type { Node, Edge } from '@xyflow/react'
 import type { NodeData, EdgeData } from '@/types'
+import { normalizeHandle } from '@/utils/handleUtils'
 
 // ── Types ────────────────────────────────────────────────────────────────────
 
@@ -29,6 +30,7 @@ export interface ApiNode extends Record<string, unknown> {
   show_hardware?: boolean
   width?: number | null
   height?: number | null
+  bottom_handles?: number
 }
 
 export interface ApiEdge {
@@ -99,13 +101,11 @@ export function serializeNode(n: Node<NodeData>): Record<string, unknown> {
     show_hardware: n.data.show_hardware ?? false,
     width: n.width ?? null,
     height: n.height ?? null,
+    bottom_handles: n.data.bottom_handles ?? 1,
     pos_x: n.position.x,
     pos_y: n.position.y,
   }
 }
-
-const normalizeHandle = (h: string | null | undefined): string | null =>
-  h === 'top-t' ? 'top' : h === 'bottom-t' ? 'bottom' : (h ?? null)
 
 export function serializeEdge(e: Edge<EdgeData>): Record<string, unknown> {
   return {
