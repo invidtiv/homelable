@@ -26,9 +26,10 @@ interface CanvasContainerProps {
   onConnect?: (connection: Connection) => void
   onEdgeDoubleClick?: (edge: Edge<EdgeData>) => void
   onNodeDragStart?: () => void
+  onOpenPending?: (deviceId: string) => void
 }
 
-export function CanvasContainer({ onConnect: onConnectProp, onEdgeDoubleClick, onNodeDragStart }: CanvasContainerProps) {
+export function CanvasContainer({ onConnect: onConnectProp, onEdgeDoubleClick, onNodeDragStart, onOpenPending }: CanvasContainerProps) {
   const [lassoMode, setLassoMode] = useState(true)
   const {
     nodes, edges,
@@ -101,7 +102,7 @@ export function CanvasContainer({ onConnect: onConnectProp, onEdgeDoubleClick, o
           size={1}
           color={theme.colors.canvasDotColor}
         />
-        <SearchBar />
+        <SearchBar onOpenPending={onOpenPending} />
         <Controls>
           <ControlButton
             onClick={() => setLassoMode((m) => !m)}

@@ -44,6 +44,8 @@ export default function App() {
 
   const [themeModalOpen, setThemeModalOpen] = useState(false)
   const [searchOpen, setSearchOpen] = useState(false)
+  const [sidebarForceView, setSidebarForceView] = useState<'pending' | undefined>(undefined)
+  const [highlightPendingId, setHighlightPendingId] = useState<string | undefined>(undefined)
   const [shortcutsOpen, setShortcutsOpen] = useState(false)
   const [addNodeOpen, setAddNodeOpen] = useState(false)
   const [addGroupRectOpen, setAddGroupRectOpen] = useState(false)
@@ -370,6 +372,8 @@ export default function App() {
             onScan={() => setScanConfigOpen(true)}
             onSave={handleSave}
             onNodeApproved={setEditNodeId}
+            forceView={sidebarForceView}
+            highlightPendingId={highlightPendingId}
           />
           <div className="flex flex-col flex-1 min-w-0">
             <Toolbar
@@ -386,7 +390,19 @@ export default function App() {
             />
             <div className="flex flex-1 min-h-0">
               <div ref={canvasRef} className="flex-1 min-w-0 h-full">
-                <CanvasContainer onConnect={handleEdgeConnect} onEdgeDoubleClick={handleEdgeDoubleClick} onNodeDragStart={snapshotHistory} />
+                <CanvasContainer
+                  onConnect={handleEdgeConnect}
+                  onEdgeDoubleClick={handleEdgeDoubleClick}
+                  onNodeDragStart={snapshotHistory}
+                  onOpenPending={(deviceId) => {
+                    setHighlightPendingId(undefined)
+                    setSidebarForceView(undefined)
+                    setTimeout(() => {
+                      setHighlightPendingId(deviceId)
+                      setSidebarForceView('pending')
+                    }, 0)
+                  }}
+                />
               </div>
               {(selectedNodeId || selectedNodeIds.length > 1) && <DetailPanel onEdit={handleEditNode} />}
             </div>
@@ -484,7 +500,18 @@ export default function App() {
           onClose={() => setThemeModalOpen(false)}
         />
 
-        <SearchModal open={searchOpen} onClose={() => setSearchOpen(false)} />
+        <SearchModal
+          open={searchOpen}
+          onClose={() => setSearchOpen(false)}
+          onOpenPending={(deviceId) => {
+            setHighlightPendingId(undefined)
+            setSidebarForceView(undefined)
+            setTimeout(() => {
+              setHighlightPendingId(deviceId)
+              setSidebarForceView('pending')
+            }, 0)
+          }}
+        />
         <ShortcutsModal open={shortcutsOpen} onClose={() => setShortcutsOpen(false)} />
 
         <Toaster theme="dark" position="bottom-right" />

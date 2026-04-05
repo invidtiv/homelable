@@ -35,11 +35,18 @@ interface SidebarProps {
   onScan: () => void
   onSave: () => void
   onNodeApproved: (nodeId: string) => void
+  forceView?: SidebarView
+  highlightPendingId?: string
 }
 
-export function Sidebar({ onAddNode, onAddGroupRect, onScan, onSave, onNodeApproved }: SidebarProps) {
-  const [collapsed, setCollapsed] = useState(false)
-  const [activeView, setActiveView] = useState<SidebarView>('canvas')
+export function Sidebar({ onAddNode, onAddGroupRect, onScan, onSave, onNodeApproved, forceView, highlightPendingId }: SidebarProps) {
+  const [_collapsed, setCollapsed] = useState(false)
+  const [_activeView, setActiveView] = useState<SidebarView>('canvas')
+
+  // When forceView is set, override local state without useEffect
+  const collapsed = forceView ? false : _collapsed
+  const activeView = forceView ?? _activeView
+
   const { nodes, hasUnsavedChanges, hideIp, toggleHideIp } = useCanvasStore()
 
   const networkNodes = nodes.filter((n) => n.data.type !== 'groupRect')
@@ -92,7 +99,7 @@ export function Sidebar({ onAddNode, onAddGroupRect, onScan, onSave, onNodeAppro
       {/* View content (only when expanded) */}
       {!collapsed && activeView !== 'canvas' && (
         <div className="flex-1 min-h-0 overflow-y-auto border-t border-border">
-          {activeView === 'pending' && <PendingDevicesPanel onNodeApproved={onNodeApproved} />}
+          {activeView === 'pending' && <PendingDevicesPanel onNodeApproved={onNodeApproved} highlightId={highlightPendingId} />}
           {activeView === 'hidden' && <HiddenDevicesPanel />}
           {activeView === 'history' && <ScanHistoryPanel />}
           {activeView === 'settings' && <SettingsPanel />}
@@ -156,11 +163,12 @@ export function Sidebar({ onAddNode, onAddGroupRect, onScan, onSave, onNodeAppro
   )
 }
 
-function PendingDevicesPanel({ onNodeApproved }: { onNodeApproved: (nodeId: string) => void }) {
+function PendingDevicesPanel({ onNodeApproved, highlightId }: { onNodeApproved: (nodeId: string) => void; highlightId?: string }) {
   const [devices, setDevices] = useState<PendingDevice[]>([])
   const [loading, setLoading] = useState(false)
   const [selected, setSelected] = useState<PendingDevice | null>(null)
   const { addNode, scanEventTs } = useCanvasStore()
+  const highlightRef = useRef<HTMLButtonElement>(null)
 
   const load = useCallback(async () => {
     setLoading(true)
@@ -189,6 +197,11 @@ function PendingDevicesPanel({ onNodeApproved }: { onNodeApproved: (nodeId: stri
   useEffect(() => {
     if (scanEventTs > 0) load()
   }, [scanEventTs, load])
+
+  useEffect(() => {
+    if (!highlightId || loading) return
+    highlightRef.current?.scrollIntoView({ behavior: 'smooth', block: 'nearest' })
+  }, [highlightId, loading])
 
   const handleApprove = async (device: PendingDevice) => {
     try {
@@ -271,11 +284,13 @@ function PendingDevicesPanel({ onNodeApproved }: { onNodeApproved: (nodeId: stri
           const virtualBadge = detectVirtualBadge(d.mac)
           const sourceColor = d.discovery_source === 'mdns' ? '#a855f7' : '#8b949e'
           const sourceLabel = d.discovery_source === 'mdns' ? 'mDNS' : d.discovery_source === 'arp' ? 'ARP' : null
+          const isHighlighted = d.id === highlightId
           return (
             <button
               key={d.id}
+              ref={isHighlighted ? highlightRef : null}
               onClick={() => setSelected(d)}
-              className="w-full mb-1.5 p-2 rounded-md bg-[#21262d] text-xs text-left hover:bg-[#30363d] transition-colors border border-transparent hover:border-[#30363d]"
+              className={`w-full mb-1.5 p-2 rounded-md text-xs text-left transition-colors border ${isHighlighted ? 'bg-[#2d3748] border-[#e3b341]' : 'bg-[#21262d] border-transparent hover:bg-[#30363d] hover:border-[#30363d]'}`}
             >
               <div className="flex items-center gap-1.5">
                 <span className="w-1.5 h-1.5 rounded-full bg-[#e3b341] shrink-0" />
