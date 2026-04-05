@@ -482,7 +482,7 @@ function ScanHistoryPanel() {
             )}
           </div>
           <div className="text-muted-foreground text-[10px] mt-0.5">
-            {new Date(r.started_at).toLocaleString()}
+            {new Date(r.started_at.endsWith('Z') ? r.started_at : r.started_at + 'Z').toLocaleString()}
           </div>
           {r.ranges.length > 0 && (
             <div className="text-[#8b949e] text-[10px] font-mono truncate">{r.ranges.join(', ')}</div>

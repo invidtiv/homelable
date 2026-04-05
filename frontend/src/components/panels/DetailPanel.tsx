@@ -147,7 +147,7 @@ export function DetailPanel({ onEdit }: DetailPanelProps) {
         {data.mac && <DetailRow label="MAC" value={data.mac} mono />}
         {data.os && <DetailRow label="OS" value={data.os} />}
         {data.check_method && <DetailRow label="Check" value={data.check_method} mono />}
-        {data.last_seen && <DetailRow label="Last Seen" value={new Date(data.last_seen).toLocaleString()} />}
+        {data.last_seen && <DetailRow label="Last Seen" value={new Date(data.last_seen.endsWith('Z') ? data.last_seen : data.last_seen + 'Z').toLocaleString()} />}
       </div>
 
       {(data.cpu_count != null || data.cpu_model || data.ram_gb != null || data.disk_gb != null) && (

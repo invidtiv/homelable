@@ -105,7 +105,7 @@ export function PendingDeviceModal({ device, onClose, onApprove, onHide, onIgnor
             {device.discovery_source && (
               <InfoRow label="Source" value={device.discovery_source.toUpperCase()} />
             )}
-            <InfoRow label="Discovered" value={new Date(device.discovered_at).toLocaleString()} />
+            <InfoRow label="Discovered" value={new Date(device.discovered_at.endsWith('Z') ? device.discovered_at : device.discovered_at + 'Z').toLocaleString()} />
           </div>
 
           {/* Services */}
