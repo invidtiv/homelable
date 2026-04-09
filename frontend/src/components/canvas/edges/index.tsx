@@ -255,18 +255,12 @@ export function HomelableEdge({ id, source, target, sourceX, sourceY, targetX, t
           stroke={strokeColor}
           strokeWidth={style.strokeWidth as number ?? 2}
           strokeDasharray="5"
-          style={{ pointerEvents: 'none' }}
-        >
-          {/* Always animate physically downward: if source is above target the path
-              goes forward (source→target = down), otherwise reverse */}
-          <animate
-            attributeName="stroke-dashoffset"
-            from={sourceY <= targetY ? '10' : '0'}
-            to={sourceY <= targetY ? '0' : '10'}
-            dur="0.5s"
-            repeatCount="indefinite"
-          />
-        </path>
+          style={{
+            pointerEvents: 'none',
+            animation: 'homelable-basic-dash 0.5s linear infinite',
+            animationDirection: sourceY <= targetY ? 'normal' : 'reverse',
+          }}
+        />
       )}
 
       {animMode === 'snake' && (
