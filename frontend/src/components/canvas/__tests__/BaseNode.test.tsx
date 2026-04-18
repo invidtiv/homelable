@@ -50,10 +50,16 @@ vi.mock('@/utils/maskIp', () => ({
   maskIp: (ip: string) => ip,
 }))
 
+vi.mock('@/utils/propertyIcons', () => ({
+  resolvePropertyIcon: (icon: string | null) => icon ? Server : null,
+}))
+
 vi.mock('@/utils/handleUtils', () => ({
   BOTTOM_HANDLE_IDS: ['bottom'],
   BOTTOM_HANDLE_POSITIONS: { 1: [50] },
 }))
+
+beforeEach(() => { mockZoom = 1 })
 
 function makeNode(data: Partial<NodeData>): Node<NodeData> {
   return {

@@ -78,6 +78,11 @@ export function CanvasContainer({ onConnect: onConnectProp, onEdgeDoubleClick, o
     return true
   }, [snapshotHistory])
 
+  const isValidConnection = useCallback(
+    (connection: { source: string | null; target: string | null }) => connection.source !== connection.target,
+    []
+  )
+
   return (
     <div className="w-full h-full" style={{ background: theme.colors.canvasBackground }}>
       <ReactFlow
@@ -107,7 +112,7 @@ export function CanvasContainer({ onConnect: onConnectProp, onEdgeDoubleClick, o
         colorMode={theme.colors.reactFlowColorMode}
         elevateNodesOnSelect={false}
         connectionMode={ConnectionMode.Loose}
-        isValidConnection={(connection) => connection.source !== connection.target}
+        isValidConnection={isValidConnection}
       >
         <Background
           variant={BackgroundVariant.Dots}

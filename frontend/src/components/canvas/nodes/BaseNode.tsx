@@ -115,10 +115,10 @@ export function BaseNode({ id, data, selected, icon: typeIcon, width, height }: 
         <>
           <div style={{ height: 1, background: `${colors.border}44`, margin: '0 8px' }} />
           <div className="flex flex-col gap-1 px-2.5 py-1.5">
-            {visibleProperties.map((prop, i) => {
+            {visibleProperties.map((prop) => {
               const Icon = resolvePropertyIcon(prop.icon)
               return (
-                <div key={i} className="flex items-center gap-1 font-mono text-[10px]" style={{ color: theme.colors.nodeSubtextColor }}>
+                <div key={prop.key} className="flex items-center gap-1 font-mono text-[10px]" style={{ color: theme.colors.nodeSubtextColor }}>
                   {Icon && <Icon size={9} className="shrink-0" />}
                   <span className="truncate max-w-[60px] shrink-0" title={prop.key}>{prop.key}</span>
                   <span className="truncate" title={prop.value}>· {prop.value}</span>
