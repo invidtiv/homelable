@@ -134,12 +134,12 @@ describe('NodeModal', () => {
     const onClose = vi.fn()
     const onSubmit = vi.fn()
 
-    const { rerender } = render(<NodeModal open onClose={onClose} onSubmit={onSubmit} />)
+    const { rerender } = render(<NodeModal key="open-1" open onClose={onClose} onSubmit={onSubmit} />)
     fireEvent.change(screen.getByPlaceholderText('My Server'), { target: { value: 'Temp Node' } })
     fireEvent.change(screen.getByPlaceholderText('server.lan'), { target: { value: 'temp.local' } })
 
-    rerender(<NodeModal open={false} onClose={onClose} onSubmit={onSubmit} />)
-    rerender(<NodeModal open onClose={onClose} onSubmit={onSubmit} />)
+    rerender(<NodeModal key="closed" open={false} onClose={onClose} onSubmit={onSubmit} />)
+    rerender(<NodeModal key="open-2" open onClose={onClose} onSubmit={onSubmit} />)
 
     expect((screen.getByPlaceholderText('My Server') as HTMLInputElement).value).toBe('')
     expect((screen.getByPlaceholderText('server.lan') as HTMLInputElement).value).toBe('')

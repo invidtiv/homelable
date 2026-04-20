@@ -422,6 +422,7 @@ export default function App() {
         </div>
 
         <NodeModal
+          key={addNodeOpen ? 'add-open' : 'add-closed'}
           open={addNodeOpen}
           onClose={() => setAddNodeOpen(false)}
           onSubmit={handleAddNode}

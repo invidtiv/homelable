@@ -1,4 +1,4 @@
-import { createElement, useEffect, useState } from 'react'
+import { createElement, useState } from 'react'
 import { RotateCcw, ChevronDown } from 'lucide-react'
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from '@/components/ui/dialog'
 import { Button } from '@/components/ui/button'
@@ -47,14 +47,6 @@ export function NodeModal({ open, onClose, onSubmit, initial, title = 'Add Node'
   const [iconSearch, setIconSearch] = useState('')
   const [iconPickerOpen, setIconPickerOpen] = useState(false)
   const [labelError, setLabelError] = useState(false)
-
-  useEffect(() => {
-    if (!open) return
-    setForm({ ...DEFAULT_DATA, ...initial })
-    setIconSearch('')
-    setIconPickerOpen(false)
-    setLabelError(false)
-  }, [open, initial])
 
   const set = (key: keyof NodeData, value: unknown) =>
     setForm((f) => ({ ...f, [key]: value }))
