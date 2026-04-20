@@ -130,6 +130,21 @@ describe('NodeModal', () => {
     expect(data.notes).toBe('rack A')
   })
 
+  it('resets form values when reopened in Add mode', () => {
+    const onClose = vi.fn()
+    const onSubmit = vi.fn()
+
+    const { rerender } = render(<NodeModal open onClose={onClose} onSubmit={onSubmit} />)
+    fireEvent.change(screen.getByPlaceholderText('My Server'), { target: { value: 'Temp Node' } })
+    fireEvent.change(screen.getByPlaceholderText('server.lan'), { target: { value: 'temp.local' } })
+
+    rerender(<NodeModal open={false} onClose={onClose} onSubmit={onSubmit} />)
+    rerender(<NodeModal open onClose={onClose} onSubmit={onSubmit} />)
+
+    expect((screen.getByPlaceholderText('My Server') as HTMLInputElement).value).toBe('')
+    expect((screen.getByPlaceholderText('server.lan') as HTMLInputElement).value).toBe('')
+  })
+
   it('submits check_target', () => {
     const { onSubmit } = renderModal({ initial: BASE })
     fireEvent.change(screen.getByPlaceholderText('http://...'), { target: { value: 'http://192.168.1.10:8080' } })

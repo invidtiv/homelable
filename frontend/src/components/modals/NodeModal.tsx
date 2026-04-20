@@ -1,4 +1,4 @@
-import { createElement, useState } from 'react'
+import { createElement, useEffect, useState } from 'react'
 import { RotateCcw, ChevronDown } from 'lucide-react'
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from '@/components/ui/dialog'
 import { Button } from '@/components/ui/button'
@@ -42,13 +42,19 @@ interface NodeModalProps {
 
 const CHILD_TYPES: NodeType[] = ['vm', 'lxc']
 
-// NodeModal is always mounted with a key that changes on open/edit, so useState
-// initial value is enough — no need for a reset effect.
 export function NodeModal({ open, onClose, onSubmit, initial, title = 'Add Node', proxmoxNodes = [] }: NodeModalProps) {
   const [form, setForm] = useState<Partial<NodeData>>({ ...DEFAULT_DATA, ...initial })
   const [iconSearch, setIconSearch] = useState('')
   const [iconPickerOpen, setIconPickerOpen] = useState(false)
   const [labelError, setLabelError] = useState(false)
+
+  useEffect(() => {
+    if (!open) return
+    setForm({ ...DEFAULT_DATA, ...initial })
+    setIconSearch('')
+    setIconPickerOpen(false)
+    setLabelError(false)
+  }, [open, initial])
 
   const set = (key: keyof NodeData, value: unknown) =>
     setForm((f) => ({ ...f, [key]: value }))
