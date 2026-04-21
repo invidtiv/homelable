@@ -637,7 +637,7 @@ function SettingsPanel() {
             min={10}
             max={3600}
             value={interval}
-            onChange={(e) => setIntervalValue(Number(e.target.value))}
+            onChange={(e) => { const v = Number(e.target.value); if (!isNaN(v)) setIntervalValue(v) }}
             className="w-24 px-2 py-1 rounded-md text-xs font-mono bg-[#0d1117] border border-border text-foreground focus:outline-none focus:border-[#00d4ff]"
           />
           <span className="text-xs text-muted-foreground">seconds</span>
@@ -674,7 +674,7 @@ function VersionBadge() {
       </a>
       {hasUpdate && latest && (
         <a
-          href={latest.url}
+          href={latest.url.startsWith('https://') ? latest.url : '#'}
           target="_blank"
           rel="noopener noreferrer"
           className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded text-[10px] font-medium bg-[#e3b341]/15 text-[#e3b341] border border-[#e3b341]/30 hover:bg-[#e3b341]/25 transition-colors self-start"
