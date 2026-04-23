@@ -68,7 +68,7 @@ export function EdgeModal({ open, onClose, onSubmit, onDelete, onClearWaypoints,
           <div className="flex flex-col gap-1.5">
             <Label className="text-xs text-muted-foreground">Link Type</Label>
             <Select value={type} onValueChange={(v) => setType(v as EdgeType)}>
-              <SelectTrigger className="bg-[#21262d] border-[#30363d] text-sm h-8">
+              <SelectTrigger className="bg-[#21262d] border-[#30363d] text-sm h-8 cursor-pointer" aria-label="Edge type selector">
                 <SelectValue />
               </SelectTrigger>
               <SelectContent className="bg-[#21262d] border-[#30363d]">
@@ -112,7 +112,9 @@ export function EdgeModal({ open, onClose, onSubmit, onDelete, onClearWaypoints,
                   key={style}
                   type="button"
                   onClick={() => setPathStyle(style)}
-                  className="flex-1 py-1 text-xs capitalize transition-colors"
+                  className="flex-1 py-1 text-xs capitalize transition-colors cursor-pointer"
+                  tabIndex={0}
+                  aria-label={`Path style ${style}`}
                   style={{
                     background: pathStyle === style ? '#00d4ff22' : '#21262d',
                     color: pathStyle === style ? '#00d4ff' : '#8b949e',
@@ -133,7 +135,9 @@ export function EdgeModal({ open, onClose, onSubmit, onDelete, onClearWaypoints,
                   key={mode}
                   type="button"
                   onClick={() => setAnimation(mode)}
-                  className="flex-1 py-1 text-xs capitalize transition-colors"
+                  className="flex-1 py-1 text-xs capitalize transition-colors cursor-pointer"
+                  tabIndex={0}
+                  aria-label={`Animation mode ${mode}`}
                   style={{
                     background: animation === mode ? '#00d4ff22' : '#21262d',
                     color: animation === mode ? '#00d4ff' : '#8b949e',
@@ -162,6 +166,8 @@ export function EdgeModal({ open, onClose, onSubmit, onDelete, onClearWaypoints,
             <label
               className="relative flex items-center gap-2.5 px-2.5 h-8 rounded-md border cursor-pointer"
               style={{ borderColor: customColor ? effectiveColor : '#30363d', background: '#21262d' }}
+              tabIndex={0}
+              aria-label="Edge color picker"
             >
               <input
                 type="color"
