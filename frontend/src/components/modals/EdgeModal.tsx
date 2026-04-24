@@ -70,7 +70,7 @@ export function EdgeModal({ open, onClose, onSubmit, onDelete, onClearWaypoints,
             <Label className="text-xs text-muted-foreground">Link Type</Label>
             <Select value={type} onValueChange={(v) => setType(v as EdgeType)}>
               <SelectTrigger className={`bg-[#21262d] border-[#30363d] text-sm h-8 cursor-pointer ${modalStyles['modal-interactive']} ${modalStyles['modal-radius']}`} aria-label="Edge type selector">
-                <SelectValue />
+                <SelectValue>{EDGE_TYPE_LABELS[type]}</SelectValue>
               </SelectTrigger>
               <SelectContent className="bg-[#21262d] border-[#30363d]">
                 {EDGE_TYPES.map(([value, label]) => (
