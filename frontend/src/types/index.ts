@@ -93,6 +93,7 @@ export interface NodeData extends Record<string, unknown> {
     height?: number
   }
   custom_icon?: string
+  /** Number of bottom connection points, 1..48. Default 1 (centered). */
   bottom_handles?: number
 }
 

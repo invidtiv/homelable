@@ -367,18 +367,37 @@ describe('NodeModal', () => {
 
   it('defaults bottom_handles to 1', () => {
     renderModal({ initial: BASE })
-    expect(selects()[2].value).toBe('1')
+    const slider = screen.getByLabelText('Bottom connection points slider') as HTMLInputElement
+    expect(slider.value).toBe('1')
   })
 
   it('pre-fills bottom_handles from initial', () => {
     renderModal({ initial: { ...BASE, bottom_handles: 3 } })
-    expect(selects()[2].value).toBe('3')
+    const slider = screen.getByLabelText('Bottom connection points slider') as HTMLInputElement
+    expect(slider.value).toBe('3')
   })
 
   it('submits updated bottom_handles', () => {
     const { onSubmit } = renderModal({ initial: BASE })
-    fireEvent.change(selects()[2], { target: { value: '4' } })
+    const slider = screen.getByLabelText('Bottom connection points slider') as HTMLInputElement
+    fireEvent.change(slider, { target: { value: '12' } })
     fireEvent.click(screen.getByRole('button', { name: 'Add' }))
-    expect((onSubmit.mock.calls[0][0] as Partial<NodeData>).bottom_handles).toBe(4)
+    expect((onSubmit.mock.calls[0][0] as Partial<NodeData>).bottom_handles).toBe(12)
+  })
+
+  it('supports the full 1..48 range', () => {
+    const { onSubmit } = renderModal({ initial: BASE })
+    const slider = screen.getByLabelText('Bottom connection points slider') as HTMLInputElement
+    expect(slider.min).toBe('1')
+    expect(slider.max).toBe('48')
+    fireEvent.change(slider, { target: { value: '48' } })
+    fireEvent.click(screen.getByRole('button', { name: 'Add' }))
+    expect((onSubmit.mock.calls[0][0] as Partial<NodeData>).bottom_handles).toBe(48)
+  })
+
+  it('clamps pre-filled out-of-range values into [1,48]', () => {
+    renderModal({ initial: { ...BASE, bottom_handles: 9999 } })
+    const slider = screen.getByLabelText('Bottom connection points slider') as HTMLInputElement
+    expect(slider.value).toBe('48')
   })
 })
