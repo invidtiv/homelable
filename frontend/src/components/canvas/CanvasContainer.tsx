@@ -55,6 +55,25 @@ export function CanvasContainer({ onConnect: onConnectProp, onEdgeDoubleClick, o
   const activeTheme = useThemeStore((s) => s.activeTheme)
   const theme = THEMES[activeTheme]
 
+  // Filter nodes and edges based on collapsed state
+  const getVisibleNodeIds = (): Set<string> => {
+    const visible = new Set<string>()
+    const queue = nodes.filter((n) => !n.parentId).map((n) => n.id)
+    while (queue.length > 0) {
+      const id = queue.shift()!
+      visible.add(id)
+      const node = nodes.find((n) => n.id === id)
+      if (node && !node.data.custom_colors?.collapsed) {
+        const children = nodes.filter((n) => n.parentId === id).map((n) => n.id)
+        queue.push(...children)
+      }
+    }
+    return visible
+  }
+  const visibleNodeIds = getVisibleNodeIds()
+  const visibleNodes = nodes.filter((n) => visibleNodeIds.has(n.id))
+  const visibleEdges = edges.filter((e) => visibleNodeIds.has(e.source) && visibleNodeIds.has(e.target))
+
   const onNodeClick = useCallback((e: React.MouseEvent, node: Node<NodeData>) => {
     if (e.ctrlKey || e.metaKey) {
       setSelectedNode(null)
@@ -90,8 +109,8 @@ export function CanvasContainer({ onConnect: onConnectProp, onEdgeDoubleClick, o
   return (
     <div className="w-full h-full" style={{ background: theme.colors.canvasBackground }}>
       <ReactFlow
-        nodes={nodes}
-        edges={edges}
+        nodes={visibleNodes}
+        edges={visibleEdges}
         onNodesChange={onNodesChange}
         onEdgesChange={onEdgesChange}
         onConnect={onConnectProp}

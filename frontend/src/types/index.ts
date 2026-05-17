@@ -96,6 +96,8 @@ export interface NodeData extends Record<string, unknown> {
     show_border?: boolean
     width?: number
     height?: number
+    // Collapsible zone state (type === 'groupRect')
+    collapsed?: boolean
   }
   custom_icon?: string
   /** Number of bottom connection points, 1..48. Default 1 (centered). */

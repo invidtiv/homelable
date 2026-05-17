@@ -52,6 +52,7 @@ interface CanvasState {
   setEditingGroupRectId: (id: string | null) => void
   editingTextId: string | null
   setEditingTextId: (id: string | null) => void
+  toggleNodeCollapsed: (id: string) => void
   createGroup: (nodeIds: string[], name: string) => void
   ungroup: (groupId: string) => void
   markSaved: () => void
@@ -373,6 +374,25 @@ export const useCanvasStore = create<CanvasState>((set) => ({
   setEditingGroupRectId: (id) => set({ editingGroupRectId: id }),
 
   setEditingTextId: (id) => set({ editingTextId: id }),
+
+  toggleNodeCollapsed: (id) =>
+    set((state) => ({
+      nodes: state.nodes.map((n) =>
+        n.id === id
+          ? {
+              ...n,
+              data: {
+                ...n.data,
+                custom_colors: {
+                  ...n.data.custom_colors,
+                  collapsed: !n.data.custom_colors?.collapsed,
+                },
+              },
+            }
+          : n
+      ),
+      hasUnsavedChanges: true,
+    })),
 
   createGroup: (nodeIds, name) =>
     set((state) => {
