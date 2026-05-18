@@ -55,7 +55,7 @@ export function GroupRectNode({ id, data, selected }: NodeProps<Node<NodeData>>)
   const posStyle = POSITION_STYLES[textPos]
 
   // Count children for collapse badge
-  const childrenCount = nodes.filter((n) => n.parentId === id).length
+  const childrenCount = (nodes ?? []).filter((n) => n.parentId === id).length
 
   const outsideJustify = textPos.includes('right') ? 'flex-end'
     : (textPos.includes('center') || textPos === 'center') ? 'center'
