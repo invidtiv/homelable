@@ -1,3 +1,4 @@
+import uuid
 from datetime import datetime, timezone
 from typing import Any
 
@@ -48,7 +49,10 @@ async def save_canvas(
         first = (await db.execute(select(Design).order_by(Design.created_at).limit(1))).scalar()
         design_id = first.id if first else None
     if design_id is None:
-        return {"saved": False, "error": "No design found"}
+        new_design = Design(id=str(uuid.uuid4()), name="Network Topology", design_type="network")
+        db.add(new_design)
+        await db.flush()
+        design_id = new_design.id
 
     incoming_node_ids = {n.id for n in body.nodes}
     incoming_edge_ids = {e.id for e in body.edges}
