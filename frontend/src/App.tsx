@@ -31,7 +31,7 @@ import { useCanvasStore } from '@/stores/canvasStore'
 import { useDesignStore } from '@/stores/designStore'
 import { useAuthStore } from '@/stores/authStore'
 import { useThemeStore } from '@/stores/themeStore'
-import { canvasApi, designsApi } from '@/api/client'
+import { canvasApi, designsApi, liveviewApi } from '@/api/client'
 import { demoNodes, demoEdges } from '@/utils/demoData'
 import { useStatusPolling } from '@/hooks/useStatusPolling'
 import type { NodeData, EdgeData, CustomStyleDef } from '@/types'
@@ -457,6 +457,28 @@ export default function App() {
     }
   }, [nodes, edges, snapshotHistory, loadCanvas, markUnsaved])
 
+  // Open the read-only live view of the currently active design in a new tab.
+  // Standalone has no backend/key — it reads localStorage, so just open /view.
+  // Otherwise fetch the configured live view key and build /view?key=...&design=<id>.
+  const handleViewOnly = useCallback(async () => {
+    if (STANDALONE) {
+      window.open('/view', '_blank', 'noopener,noreferrer')
+      return
+    }
+    try {
+      const res = await liveviewApi.getConfig()
+      if (!res.data.enabled || !res.data.key) {
+        toast.error('Live view is disabled — set LIVEVIEW_KEY in the backend .env')
+        return
+      }
+      const params = new URLSearchParams({ key: res.data.key })
+      if (activeDesignId) params.set('design', activeDesignId)
+      window.open(`/view?${params.toString()}`, '_blank', 'noopener,noreferrer')
+    } catch {
+      toast.error('Failed to open live view')
+    }
+  }, [activeDesignId])
+
   const handleExport = useCallback(() => {
     const el = canvasRef.current?.querySelector<HTMLElement>('.react-flow')
     if (!el) { toast.error('Canvas not ready'); return }
@@ -601,6 +623,7 @@ export default function App() {
               onExportMd={handleExportMd}
               onExportYaml={handleExportYaml}
               onImportYaml={handleImportYaml}
+              onViewOnly={handleViewOnly}
             />
             <div className="flex flex-1 min-h-0">
               <div ref={canvasRef} className="flex-1 min-w-0 h-full">

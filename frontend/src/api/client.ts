@@ -53,7 +53,9 @@ export const edgesApi = {
 }
 
 export const liveviewApi = {
-  load: (key: string) => publicApi.get('/liveview', { params: { key } }),
+  load: (key: string, design?: string) =>
+    publicApi.get('/liveview', { params: { key, ...(design ? { design_id: design } : {}) } }),
+  getConfig: () => api.get<{ enabled: boolean; key: string | null }>('/liveview/config'),
 }
 
 export const scanApi = {

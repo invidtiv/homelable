@@ -2,9 +2,11 @@ import hmac
 from typing import Any
 
 from fastapi import APIRouter, Depends, HTTPException, Query
+from pydantic import BaseModel
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.api.deps import get_current_user
 from app.core.config import settings
 from app.db.database import get_db
 from app.db.models import CanvasState, Design, Edge, Node
@@ -13,6 +15,26 @@ from app.schemas.edges import EdgeResponse
 from app.schemas.nodes import NodeResponse
 
 router = APIRouter()
+
+
+class LiveViewConfigResponse(BaseModel):
+    """Whether live view is enabled, plus the key (admin-only) to build share links."""
+
+    enabled: bool
+    key: str | None = None
+
+
+@router.get("/config", response_model=LiveViewConfigResponse)
+async def liveview_config(
+    _: str = Depends(get_current_user),
+) -> LiveViewConfigResponse:
+    """Authenticated: expose the configured live view key so the UI can build a
+    ready-to-use share link (e.g. /view?key=...&design=<id>).
+
+    Only reachable by a logged-in user — the key is never exposed publicly.
+    """
+    key = settings.liveview_key or None
+    return LiveViewConfigResponse(enabled=bool(key), key=key)
 
 
 @router.get("", response_model=CanvasStateResponse)

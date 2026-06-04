@@ -158,6 +158,16 @@ describe('api/client', () => {
     expect(api.get).not.toHaveBeenCalled()
   })
 
+  it('liveviewApi.load forwards design as design_id when provided', () => {
+    mod.liveviewApi.load('k-1', 'design-9')
+    expect(publicApi.get).toHaveBeenCalledWith('/liveview', { params: { key: 'k-1', design_id: 'design-9' } })
+  })
+
+  it('liveviewApi.getConfig hits the authenticated config endpoint', () => {
+    mod.liveviewApi.getConfig()
+    expect(api.get).toHaveBeenCalledWith('/liveview/config')
+  })
+
   it('scanApi endpoints route correctly', () => {
     mod.scanApi.trigger()
     expect(api.post).toHaveBeenCalledWith('/scan/trigger')

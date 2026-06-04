@@ -118,7 +118,15 @@ describe('LiveView (non-standalone)', () => {
     await waitFor(() => {
       expect(screen.getByTestId('react-flow')).toBeDefined()
     })
-    expect(liveviewApi.load).toHaveBeenCalledWith('correct-key')
+    expect(liveviewApi.load).toHaveBeenCalledWith('correct-key', undefined)
+  })
+
+  it('forwards ?design=<id> to the API so a specific canvas is loaded', async () => {
+    setSearch('?key=correct-key&design=elec-123')
+    vi.mocked(liveviewApi.load).mockResolvedValue(canvasPayload as never)
+    render(<LiveView />)
+    await waitFor(() => expect(screen.getByTestId('react-flow')).toBeDefined())
+    expect(liveviewApi.load).toHaveBeenCalledWith('correct-key', 'elec-123')
   })
 
   it('allows zooming out to 0.25 so large infra fits (matches the editor)', async () => {
