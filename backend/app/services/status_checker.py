@@ -64,17 +64,35 @@ async def check_node(check_method: str, target: str | None, ip: str | None) -> d
         return {"status": "offline", "response_time_ms": None}
 
 
+def _is_ipv6(host: str) -> bool:
+    """True if host is a literal IPv6 address (bracketed or bare)."""
+    try:
+        socket.inet_pton(socket.AF_INET6, host.strip("[]"))
+        return True
+    except OSError:
+        return False
+
+
 async def _ping(host: str) -> bool:
-    # ping(8) -W flag units differ by OS:
-    #   Linux:   seconds        (-W 1   = 1s)
-    #   macOS:   milliseconds   (-W 1   = 1ms — fails for any RTT >1ms)
-    #   Windows: -w in ms       (-w 1000 = 1s)
+    # Send 2 probes with a ~2s timeout so a single dropped packet or a slow
+    # device (ESPHome, IoT) doesn't flap a node offline. Success = any reply.
+    #
+    # -W flag units differ by OS:
+    #   Linux:   seconds        (-W 2   = 2s)
+    #   macOS:   milliseconds   (-W 2000 = 2s)
+    #   Windows: -w in ms       (-w 2000 = 2s)
+    #
+    # IPv6-only hosts (e.g. Alexa) never answer IPv4 ping, so target the right
+    # stack: macOS ships a separate ping6; Linux/Windows take a -6 flag.
+    ipv6 = _is_ipv6(host)
     if sys.platform == "win32":
-        args = ["ping", "-n", "1", "-w", "1000", host]
+        family = ["-6"] if ipv6 else ["-4"]
+        args = ["ping", *family, "-n", "2", "-w", "2000", host]
     elif sys.platform == "darwin":
-        args = ["ping", "-c", "1", "-W", "1000", host]
+        args = ["ping6", "-c", "2", host] if ipv6 else ["ping", "-c", "2", "-W", "2000", host]
     else:
-        args = ["ping", "-c", "1", "-W", "1", host]
+        family = ["-6"] if ipv6 else []
+        args = ["ping", *family, "-c", "2", "-W", "2", host]
     proc = await asyncio.create_subprocess_exec(
         *args,
         stdout=asyncio.subprocess.DEVNULL,

@@ -169,9 +169,14 @@ async def test_ping_uses_unix_args_on_non_windows():
     assert "-c" in captured["args"]
     assert "-W" in captured["args"]
     assert "-n" not in captured["args"]
-    # Linux: -W is in seconds; 1s is the intended timeout
+    # 2 probes so a single dropped packet doesn't flap the node offline
+    c_idx = captured["args"].index("-c")
+    assert captured["args"][c_idx + 1] == "2"
+    # Linux: -W is in seconds; 2s is the intended timeout
     w_idx = captured["args"].index("-W")
-    assert captured["args"][w_idx + 1] == "1"
+    assert captured["args"][w_idx + 1] == "2"
+    # IPv4 target → no -6 flag
+    assert "-6" not in captured["args"]
 
 
 @pytest.mark.asyncio
@@ -193,7 +198,7 @@ async def test_ping_uses_macos_millisecond_timeout():
     assert "-c" in captured["args"]
     assert "-W" in captured["args"]
     w_idx = captured["args"].index("-W")
-    assert captured["args"][w_idx + 1] == "1000"
+    assert captured["args"][w_idx + 1] == "2000"
 
 
 @pytest.mark.asyncio
@@ -214,6 +219,75 @@ async def test_ping_uses_windows_args_on_win32():
     assert "-n" in captured["args"]
     assert "-w" in captured["args"]
     assert "-c" not in captured["args"]
+
+
+# --- _ping IPv6 support ---
+
+@pytest.mark.asyncio
+async def test_ping_ipv6_linux_uses_dash6():
+    """IPv6-only devices (e.g. Alexa) need ping -6 on Linux."""
+    captured = {}
+
+    async def fake_exec(*args, **kwargs):
+        captured["args"] = args
+        proc = MagicMock()
+        proc.returncode = 0
+        proc.wait = AsyncMock()
+        return proc
+
+    with patch("app.services.status_checker.sys.platform", "linux"), \
+         patch("asyncio.create_subprocess_exec", side_effect=fake_exec):
+        await _ping("fe80::1")
+
+    assert "-6" in captured["args"]
+    assert captured["args"][-1] == "fe80::1"
+
+
+@pytest.mark.asyncio
+async def test_ping_ipv6_macos_uses_ping6():
+    """macOS ships a separate ping6 binary for IPv6 targets."""
+    captured = {}
+
+    async def fake_exec(*args, **kwargs):
+        captured["args"] = args
+        proc = MagicMock()
+        proc.returncode = 0
+        proc.wait = AsyncMock()
+        return proc
+
+    with patch("app.services.status_checker.sys.platform", "darwin"), \
+         patch("asyncio.create_subprocess_exec", side_effect=fake_exec):
+        await _ping("2001:db8::1")
+
+    assert captured["args"][0] == "ping6"
+
+
+@pytest.mark.asyncio
+async def test_ping_ipv6_windows_uses_dash6():
+    captured = {}
+
+    async def fake_exec(*args, **kwargs):
+        captured["args"] = args
+        proc = MagicMock()
+        proc.returncode = 0
+        proc.wait = AsyncMock()
+        return proc
+
+    with patch("app.services.status_checker.sys.platform", "win32"), \
+         patch("asyncio.create_subprocess_exec", side_effect=fake_exec):
+        await _ping("2001:db8::1")
+
+    assert "-6" in captured["args"]
+
+
+def test_is_ipv6_detection():
+    from app.services.status_checker import _is_ipv6
+
+    assert _is_ipv6("fe80::1") is True
+    assert _is_ipv6("2001:db8::1") is True
+    assert _is_ipv6("[2001:db8::1]") is True
+    assert _is_ipv6("192.168.1.1") is False
+    assert _is_ipv6("example.local") is False
 
 
 # --- check_node target validation ---

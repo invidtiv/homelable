@@ -675,7 +675,9 @@ const CATEGORY_COLORS: Record<string, string> = {
 
 function ServiceBadge({ svc, host, onEdit, onRemove }: { svc: ServiceInfo; host?: string; onEdit: () => void; onRemove: () => void }) {
   const url = getServiceUrl(svc, host)
-  const color = CATEGORY_COLORS[svc.category ?? ''] ?? '#8b949e'
+  // Manually-added services carry no category, so they fell back to grey even
+  // when they're reachable HTTP/HTTPS. Treat any resolvable web URL as `web`.
+  const color = CATEGORY_COLORS[svc.category ?? ''] ?? (url ? CATEGORY_COLORS.web : '#8b949e')
   const pathLabel = svc.path?.trim() ? svc.path.trim() : ''
 
   return (

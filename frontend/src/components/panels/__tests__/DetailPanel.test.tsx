@@ -502,6 +502,25 @@ describe('DetailPanel', () => {
       render(<DetailPanel onEdit={vi.fn()} />)
       expect(screen.getByText('health').tagName).not.toBe('A')
     })
+
+    it('colors a categoryless but reachable web service blue, not grey', () => {
+      setupStore({ ip: '192.168.1.10', services: [{ port: 8080, protocol: 'tcp', service_name: 'nginx', path: '' }] })
+      render(<DetailPanel onEdit={vi.fn()} />)
+      const link = screen.getByRole('link', { name: 'nginx' })
+      expect(link.style.color).toBe('rgb(0, 212, 255)') // #00d4ff (web)
+    })
+
+    it('keeps a categoryless unreachable service grey', () => {
+      setupStore({ ip: undefined, services: [{ protocol: 'tcp', service_name: 'health', path: '' }] })
+      render(<DetailPanel onEdit={vi.fn()} />)
+      expect(screen.getByText('health').style.color).toBe('rgb(139, 148, 158)') // #8b949e
+    })
+
+    it('respects an explicit category over the url fallback', () => {
+      setupStore({ ip: '192.168.1.10', services: [{ port: 5432, protocol: 'tcp', service_name: 'pg', category: 'database', path: '' }] })
+      render(<DetailPanel onEdit={vi.fn()} />)
+      expect(screen.getByText('pg').style.color).toBe('rgb(168, 85, 247)') // #a855f7 (database)
+    })
   })
 
   describe('Last Seen formatting', () => {
