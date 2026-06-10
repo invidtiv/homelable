@@ -410,19 +410,25 @@ async def test_check_service_web_offline_when_http_fails():
 
 
 @pytest.mark.asyncio
-async def test_check_service_non_http_port_uses_tcp():
-    captured = {}
-
-    async def fake_tcp(host, port):
-        captured["host"] = host
-        captured["port"] = port
-        return True
-
+async def test_check_service_non_http_port_is_unknown():
+    """Non-HTTP ports (DB, mail, …) stay grey — no TCP check, no red flap."""
     svc = {"port": 5432, "protocol": "tcp", "service_name": "postgres"}
-    with patch("app.services.status_checker._tcp_connect", side_effect=fake_tcp):
+    with patch("app.services.status_checker._tcp_connect", new_callable=AsyncMock) as mock_tcp, \
+         patch("app.services.status_checker._http_get", new_callable=AsyncMock) as mock_http:
         result = await check_service(svc, "10.0.0.1")
-    assert result == "online"
-    assert captured == {"host": "10.0.0.1", "port": 5432}
+    assert result == "unknown"
+    mock_tcp.assert_not_called()
+    mock_http.assert_not_called()
+
+
+@pytest.mark.asyncio
+async def test_check_service_ssh_port_22_is_unknown():
+    """SSH (port 22) is never checked — keep it grey, not red/green."""
+    svc = {"port": 22, "protocol": "tcp", "service_name": "ssh"}
+    with patch("app.services.status_checker._tcp_connect", new_callable=AsyncMock) as mock_tcp:
+        result = await check_service(svc, "10.0.0.1")
+    assert result == "unknown"
+    mock_tcp.assert_not_called()
 
 
 @pytest.mark.asyncio
@@ -445,12 +451,11 @@ async def test_check_services_returns_status_per_service():
         {"port": 80, "protocol": "tcp", "service_name": "http"},
         {"port": 5432, "protocol": "tcp", "service_name": "postgres"},
     ]
-    with patch("app.services.status_checker._http_get", new_callable=AsyncMock, return_value=True), \
-         patch("app.services.status_checker._tcp_connect", new_callable=AsyncMock, return_value=False):
+    with patch("app.services.status_checker._http_get", new_callable=AsyncMock, return_value=True):
         results = await check_services("10.0.0.1", services)
     assert results == [
         {"port": 80, "protocol": "tcp", "status": "online"},
-        {"port": 5432, "protocol": "tcp", "status": "offline"},
+        {"port": 5432, "protocol": "tcp", "status": "unknown"},
     ]
 
 
