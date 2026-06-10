@@ -5,7 +5,10 @@ import * as canvasStore from '@/stores/canvasStore'
 import type { NodeData } from '@/types'
 import type { Node } from '@xyflow/react'
 
-vi.mock('@/stores/canvasStore')
+vi.mock('@/stores/canvasStore', async (importActual) => ({
+  ...(await importActual<typeof canvasStore>()),
+  useCanvasStore: vi.fn(),
+}))
 
 function makeNode(data: Partial<NodeData>): Node<NodeData> {
   return {
@@ -22,8 +25,8 @@ function makeNode(data: Partial<NodeData>): Node<NodeData> {
   }
 }
 
-function setupStore(nodeData: Partial<NodeData> = {}) {
-  vi.mocked(canvasStore.useCanvasStore).mockReturnValue({
+function setupStore(nodeData: Partial<NodeData> = {}, serviceStatuses: Record<string, string> = {}) {
+  const state = {
     nodes: [makeNode(nodeData)],
     selectedNodeId: 'n1',
     selectedNodeIds: [],
@@ -33,7 +36,12 @@ function setupStore(nodeData: Partial<NodeData> = {}) {
     snapshotHistory: vi.fn(),
     createGroup: vi.fn(),
     ungroup: vi.fn(),
-  } as unknown as ReturnType<typeof canvasStore.useCanvasStore>)
+    serviceStatuses,
+  }
+  // Support both the bare destructure call and the selector-based call.
+  vi.mocked(canvasStore.useCanvasStore).mockImplementation(
+    ((sel?: (s: typeof state) => unknown) => (sel ? sel(state) : state)) as unknown as typeof canvasStore.useCanvasStore,
+  )
 }
 
 describe('DetailPanel', () => {
@@ -520,6 +528,24 @@ describe('DetailPanel', () => {
       setupStore({ ip: '192.168.1.10', services: [{ port: 5432, protocol: 'tcp', service_name: 'pg', category: 'database', path: '' }] })
       render(<DetailPanel onEdit={vi.fn()} />)
       expect(screen.getByText('pg').style.color).toBe('rgb(168, 85, 247)') // #a855f7 (database)
+    })
+
+    it('paints a service red when its live status is offline', () => {
+      setupStore(
+        { ip: '192.168.1.10', services: [{ port: 8080, protocol: 'tcp', service_name: 'nginx', path: '' }] },
+        { 'n1:8080/tcp': 'offline' },
+      )
+      render(<DetailPanel onEdit={vi.fn()} />)
+      expect(screen.getByRole('link', { name: 'nginx' }).style.color).toBe('rgb(248, 81, 73)') // #f85149
+    })
+
+    it('keeps the category colour when the live status is online', () => {
+      setupStore(
+        { ip: '192.168.1.10', services: [{ port: 8080, protocol: 'tcp', service_name: 'nginx', path: '' }] },
+        { 'n1:8080/tcp': 'online' },
+      )
+      render(<DetailPanel onEdit={vi.fn()} />)
+      expect(screen.getByRole('link', { name: 'nginx' }).style.color).toBe('rgb(0, 212, 255)') // #00d4ff (web)
     })
   })
 

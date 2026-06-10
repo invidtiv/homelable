@@ -3,7 +3,13 @@ from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 
-from app.services.status_checker import _ping, _tcp_connect, check_node
+from app.services.status_checker import (
+    _ping,
+    _tcp_connect,
+    check_node,
+    check_service,
+    check_services,
+)
 
 # --- check_node dispatcher ---
 
@@ -342,3 +348,112 @@ async def test_tcp_connect_os_error():
     with patch("asyncio.open_connection", new_callable=AsyncMock, side_effect=OSError("refused")):
         result = await _tcp_connect("192.168.1.1", 9999)
     assert result is False
+
+
+# --- check_service ---
+
+@pytest.mark.asyncio
+async def test_check_service_no_host_is_unknown():
+    assert await check_service({"port": 80, "protocol": "tcp", "service_name": "http"}, None) == "unknown"
+
+
+@pytest.mark.asyncio
+async def test_check_service_flag_host_is_unknown():
+    assert await check_service({"port": 80, "protocol": "tcp", "service_name": "http"}, "-O") == "unknown"
+
+
+@pytest.mark.asyncio
+async def test_check_service_udp_is_unknown():
+    assert await check_service({"port": 53, "protocol": "udp", "service_name": "dns"}, "10.0.0.1") == "unknown"
+
+
+@pytest.mark.asyncio
+async def test_check_service_portless_non_web_is_unknown():
+    svc = {"protocol": "tcp", "service_name": "thing"}
+    assert await check_service(svc, "10.0.0.1") == "unknown"
+
+
+@pytest.mark.asyncio
+async def test_check_service_web_uses_http_get():
+    captured = {}
+
+    async def fake_http_get(url, verify=False):
+        captured["url"] = url
+        return True
+
+    svc = {"port": 8080, "protocol": "tcp", "service_name": "http"}
+    with patch("app.services.status_checker._http_get", side_effect=fake_http_get):
+        result = await check_service(svc, "10.0.0.1")
+    assert result == "online"
+    assert captured["url"] == "http://10.0.0.1:8080"
+
+
+@pytest.mark.asyncio
+async def test_check_service_https_port_uses_https_scheme():
+    captured = {}
+
+    async def fake_http_get(url, verify=False):
+        captured["url"] = url
+        return True
+
+    svc = {"port": 443, "protocol": "tcp", "service_name": "web"}
+    with patch("app.services.status_checker._http_get", side_effect=fake_http_get):
+        await check_service(svc, "10.0.0.1")
+    assert captured["url"].startswith("https://")
+
+
+@pytest.mark.asyncio
+async def test_check_service_web_offline_when_http_fails():
+    svc = {"port": 80, "protocol": "tcp", "service_name": "http"}
+    with patch("app.services.status_checker._http_get", new_callable=AsyncMock, return_value=False):
+        assert await check_service(svc, "10.0.0.1") == "offline"
+
+
+@pytest.mark.asyncio
+async def test_check_service_non_http_port_uses_tcp():
+    captured = {}
+
+    async def fake_tcp(host, port):
+        captured["host"] = host
+        captured["port"] = port
+        return True
+
+    svc = {"port": 5432, "protocol": "tcp", "service_name": "postgres"}
+    with patch("app.services.status_checker._tcp_connect", side_effect=fake_tcp):
+        result = await check_service(svc, "10.0.0.1")
+    assert result == "online"
+    assert captured == {"host": "10.0.0.1", "port": 5432}
+
+
+@pytest.mark.asyncio
+async def test_check_service_ipv6_brackets_url_host():
+    captured = {}
+
+    async def fake_http_get(url, verify=False):
+        captured["url"] = url
+        return True
+
+    svc = {"port": 80, "protocol": "tcp", "service_name": "http"}
+    with patch("app.services.status_checker._http_get", side_effect=fake_http_get):
+        await check_service(svc, "2001:db8::1")
+    assert captured["url"] == "http://[2001:db8::1]:80"
+
+
+@pytest.mark.asyncio
+async def test_check_services_returns_status_per_service():
+    services = [
+        {"port": 80, "protocol": "tcp", "service_name": "http"},
+        {"port": 5432, "protocol": "tcp", "service_name": "postgres"},
+    ]
+    with patch("app.services.status_checker._http_get", new_callable=AsyncMock, return_value=True), \
+         patch("app.services.status_checker._tcp_connect", new_callable=AsyncMock, return_value=False):
+        results = await check_services("10.0.0.1", services)
+    assert results == [
+        {"port": 80, "protocol": "tcp", "status": "online"},
+        {"port": 5432, "protocol": "tcp", "status": "offline"},
+    ]
+
+
+@pytest.mark.asyncio
+async def test_check_services_empty_list():
+    assert await check_services("10.0.0.1", []) == []

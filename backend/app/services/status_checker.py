@@ -118,3 +118,74 @@ async def _tcp_connect(host: str, port: int) -> bool:
         return True
     except (TimeoutError, OSError, socket.gaierror):
         return False
+
+
+# --- Per-service status checks ---
+
+# Ports that are definitely not HTTP/web — mirror of frontend serviceUrl.ts.
+# SSH (22) is handled as a plain TCP check, so it is intentionally absent here.
+_NON_HTTP_PORTS = frozenset({
+    21, 23, 25, 465, 587, 53, 110, 143, 993, 995, 389, 636, 445, 514,
+    1433, 3306, 5432, 5672, 6379, 9092, 11211, 27017, 27018,
+})
+_HTTPS_PORTS = frozenset({443, 8443})
+
+
+def _service_host(svc: dict[str, Any], host: str) -> str:
+    """Bracket bare IPv6 literals for use in a URL."""
+    return f"[{host}]" if _is_ipv6(host) else host
+
+
+async def check_service(svc: dict[str, Any], host: str | None) -> str:
+    """Check a single service. Returns 'online' | 'offline' | 'unknown'.
+
+    Web services get an HTTP(S) GET; everything else with a port gets a TCP
+    connect. UDP services and port-less non-web services are 'unknown' so they
+    keep their category colour rather than flashing red.
+    """
+    if not host or host.startswith("-"):
+        return "unknown"
+    if str(svc.get("protocol", "")).lower() == "udp":
+        return "unknown"
+
+    port = svc.get("port")
+    port = int(port) if isinstance(port, int) or (isinstance(port, str) and port.isdigit()) else None
+
+    try:
+        if port is not None and port in _NON_HTTP_PORTS:
+            return "online" if await _tcp_connect(host, port) else "offline"
+
+        name = str(svc.get("service_name", "")).lower()
+        is_web = port is None or port not in _NON_HTTP_PORTS
+        if is_web and (port is not None or "http" in name):
+            scheme = "https" if (
+                port in _HTTPS_PORTS or "https" in name or "ssl" in name or "tls" in name
+            ) else "http"
+            url_host = _service_host(svc, host)
+            url = f"{scheme}://{url_host}" + (f":{port}" if port is not None else "")
+            return "online" if await _http_get(url, verify=False) else "offline"
+
+        if port is not None:
+            return "online" if await _tcp_connect(host, port) else "offline"
+
+        return "unknown"
+    except Exception as exc:
+        logger.debug("Service check failed for %s:%s (%s)", host, port, exc)
+        return "offline"
+
+
+async def check_services(
+    host: str | None, services: list[dict[str, Any]], concurrency: int = 10
+) -> list[dict[str, Any]]:
+    """Check every service against host concurrently (bounded).
+
+    Returns a list of {port, protocol, status} dicts, one per input service.
+    """
+    sem = asyncio.Semaphore(concurrency)
+
+    async def _one(svc: dict[str, Any]) -> dict[str, Any]:
+        async with sem:
+            status = await check_service(svc, host)
+        return {"port": svc.get("port"), "protocol": svc.get("protocol"), "status": status}
+
+    return await asyncio.gather(*[_one(s) for s in services]) if services else []

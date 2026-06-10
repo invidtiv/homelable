@@ -31,7 +31,34 @@ describe('canvasStore', () => {
       past: [],
       future: [],
       clipboard: { nodes: [], edges: [] },
+      serviceStatuses: {},
     })
+  })
+
+  it('setServiceStatuses stores live status keyed by node/port/protocol', () => {
+    const { setServiceStatuses } = useCanvasStore.getState()
+    setServiceStatuses('node-1', [
+      { port: 80, protocol: 'tcp', status: 'offline' },
+      { port: 443, protocol: 'tcp', status: 'online' },
+    ])
+    const { serviceStatuses } = useCanvasStore.getState()
+    expect(serviceStatuses['node-1:80/tcp']).toBe('offline')
+    expect(serviceStatuses['node-1:443/tcp']).toBe('online')
+  })
+
+  it('setServiceStatuses merges without dropping other nodes', () => {
+    const { setServiceStatuses } = useCanvasStore.getState()
+    setServiceStatuses('node-1', [{ port: 80, protocol: 'tcp', status: 'online' }])
+    setServiceStatuses('node-2', [{ port: 22, protocol: 'tcp', status: 'offline' }])
+    const { serviceStatuses } = useCanvasStore.getState()
+    expect(serviceStatuses['node-1:80/tcp']).toBe('online')
+    expect(serviceStatuses['node-2:22/tcp']).toBe('offline')
+  })
+
+  it('does not mark canvas unsaved on a service status update', () => {
+    useCanvasStore.setState({ hasUnsavedChanges: false })
+    useCanvasStore.getState().setServiceStatuses('n', [{ port: 80, protocol: 'tcp', status: 'offline' }])
+    expect(useCanvasStore.getState().hasUnsavedChanges).toBe(false)
   })
 
   it('setEditingTextId sets and clears editing text id', () => {

@@ -54,6 +54,15 @@ async def broadcast_status(node_id: str, status: str, checked_at: str, response_
     }))
 
 
+async def broadcast_service_status(node_id: str, services: list[dict], checked_at: str) -> None:
+    await _broadcast(json.dumps({
+        "type": "service_status",
+        "node_id": node_id,
+        "services": services,
+        "checked_at": checked_at,
+    }))
+
+
 async def broadcast_scan_update(run_id: str, devices_found: int) -> None:
     await _broadcast(json.dumps({
         "type": "scan_device_found",

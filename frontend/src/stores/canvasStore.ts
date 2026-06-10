@@ -9,7 +9,7 @@ import {
   applyEdgeChanges,
   addEdge,
 } from '@xyflow/react'
-import type { NodeData, EdgeData, NodeType, EdgeType, NodeTypeStyle, EdgeTypeStyle, CustomStyleDef } from '@/types'
+import type { NodeData, EdgeData, NodeType, EdgeType, NodeTypeStyle, EdgeTypeStyle, CustomStyleDef, ServiceStatus } from '@/types'
 import { generateUUID } from '@/utils/uuid'
 import { normalizeHandle, removedBottomHandleIds } from '@/utils/handleUtils'
 import { applyOpacity } from '@/utils/colorUtils'
@@ -21,6 +21,10 @@ type Clipboard = { nodes: Node<NodeData>[]; edges: Edge<EdgeData>[] }
 /** Resolve a node's effective parent id from either the RF field or domain data. */
 const parentIdOf = (n: Node<NodeData>): string | undefined => n.parentId ?? n.data.parent_id ?? undefined
 
+/** Key for the live per-service status overlay. */
+export const serviceStatusKey = (nodeId: string, port?: number, protocol?: string): string =>
+  `${nodeId}:${port ?? ''}/${protocol ?? ''}`
+
 interface CanvasState {
   nodes: Node<NodeData>[]
   edges: Edge<EdgeData>[]
@@ -28,6 +32,8 @@ interface CanvasState {
   selectedNodeId: string | null
   selectedNodeIds: string[]
   scanEventTs: number
+  // Live per-service status overlay (not persisted), keyed via serviceStatusKey.
+  serviceStatuses: Record<string, ServiceStatus>
 
   // History
   past: HistoryEntry[]
@@ -68,6 +74,7 @@ interface CanvasState {
   fitViewPending: boolean
   clearFitViewPending: () => void
   notifyScanDeviceFound: () => void
+  setServiceStatuses: (nodeId: string, statuses: { port?: number; protocol?: string; status: ServiceStatus }[]) => void
   hideIp: boolean
   toggleHideIp: () => void
   setHideIp: (value: boolean) => void
@@ -86,6 +93,7 @@ export const useCanvasStore = create<CanvasState>((set) => ({
   editingTextId: null,
   hideIp: readHideIp(),
   scanEventTs: 0,
+  serviceStatuses: {},
   fitViewPending: false,
 
   past: [],
@@ -580,6 +588,16 @@ export const useCanvasStore = create<CanvasState>((set) => ({
   markUnsaved: () => set({ hasUnsavedChanges: true }),
 
   notifyScanDeviceFound: () => set({ scanEventTs: Date.now() }),
+
+  setServiceStatuses: (nodeId, statuses) =>
+    set((state) => {
+      // Live overlay only — never touches node data, so it stays out of saves.
+      const next = { ...state.serviceStatuses }
+      for (const s of statuses) {
+        next[serviceStatusKey(nodeId, s.port, s.protocol)] = s.status
+      }
+      return { serviceStatuses: next }
+    }),
 
   toggleHideIp: () => set((s) => {
     const hideIp = !s.hideIp
