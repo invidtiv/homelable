@@ -70,6 +70,7 @@ interface CanvasState {
   ungroup: (groupId: string) => void
   addToGroup: (groupId: string, childId: string) => void
   addToContainer: (containerId: string, childId: string) => void
+  setNodeParent: (childId: string, parentId: string | null) => void
   removeFromGroup: (groupId: string, childId: string) => void
   markSaved: () => void
   markUnsaved: () => void
@@ -663,6 +664,72 @@ export const useCanvasStore = create<CanvasState>((set) => ({
         movedChild,
         ...others.slice(containerIdx + 1),
       ]
+
+      return {
+        nodes,
+        hasUnsavedChanges: true,
+        past: [...state.past.slice(-49), { nodes: state.nodes, edges: state.edges }],
+        future: [],
+      }
+    }),
+
+  // Re-parent a node from the detail-panel selector: attach it to a container
+  // (parentId = container id) or detach it back to the canvas (parentId = null).
+  // Handles container→container moves by going through absolute coordinates.
+  setNodeParent: (childId, parentId) =>
+    set((state) => {
+      const child = state.nodes.find((n) => n.id === childId)
+      if (!child) return state
+      const currentParentId = child.parentId
+      if ((parentId ?? undefined) === currentParentId) return state
+      if (parentId === childId) return state
+
+      const newParent = parentId ? state.nodes.find((n) => n.id === parentId) : null
+      // Only container_mode nodes may receive children via the selector.
+      if (parentId && (!newParent || newParent.data.container_mode !== true)) return state
+
+      // Child's absolute position (its stored position is relative to its
+      // current parent, if any).
+      const curParent = currentParentId ? state.nodes.find((n) => n.id === currentParentId) : null
+      const absX = child.position.x + (curParent?.position.x ?? 0)
+      const absY = child.position.y + (curParent?.position.y ?? 0)
+
+      const updatedNodes = state.nodes.map((n) => {
+        if (n.id !== childId) return n
+        if (!newParent) {
+          return {
+            ...n,
+            parentId: undefined,
+            extent: undefined,
+            position: { x: absX, y: absY },
+            data: { ...n.data, parent_id: undefined },
+          }
+        }
+        return {
+          ...n,
+          parentId: newParent.id,
+          extent: 'parent' as const,
+          position: {
+            x: Math.max(8, absX - newParent.position.x),
+            y: Math.max(8, absY - newParent.position.y),
+          },
+          selected: false,
+          data: { ...n.data, parent_id: newParent.id },
+        }
+      })
+
+      // When attaching, React Flow needs the parent before the child.
+      let nodes = updatedNodes
+      if (newParent) {
+        const others = updatedNodes.filter((n) => n.id !== childId)
+        const movedChild = updatedNodes.find((n) => n.id === childId)!
+        const parentIdx = others.findIndex((n) => n.id === newParent.id)
+        nodes = [
+          ...others.slice(0, parentIdx + 1),
+          movedChild,
+          ...others.slice(parentIdx + 1),
+        ]
+      }
 
       return {
         nodes,

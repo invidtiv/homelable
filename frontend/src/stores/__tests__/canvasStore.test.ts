@@ -651,6 +651,89 @@ describe('canvasStore', () => {
     expect(useCanvasStore.getState().hasUnsavedChanges).toBe(true)
   })
 
+  // ── setNodeParent ───────────────────────────────────────────────────────────
+
+  it('setNodeParent(null) detaches a nested node and restores absolute coords', () => {
+    const container = { ...makeNode('px1', { type: 'proxmox', container_mode: true }), position: { x: 100, y: 50 } }
+    const child = { ...makeNode('n1'), position: { x: 20, y: 30 }, parentId: 'px1', extent: 'parent' as const, data: { label: 'n1', type: 'server' as const, status: 'unknown' as const, services: [], parent_id: 'px1' } }
+    useCanvasStore.setState({ nodes: [container, child] })
+
+    useCanvasStore.getState().setNodeParent('n1', null)
+
+    const moved = useCanvasStore.getState().nodes.find((n) => n.id === 'n1')
+    expect(moved?.parentId).toBeUndefined()
+    expect(moved?.extent).toBeUndefined()
+    expect(moved?.data.parent_id).toBeUndefined()
+    // 100+20, 50+30
+    expect(moved?.position).toEqual({ x: 120, y: 80 })
+  })
+
+  it('setNodeParent attaches a top-level node to a container with relative coords', () => {
+    const container = { ...makeNode('px1', { type: 'proxmox', container_mode: true }), position: { x: 76, y: 52 } }
+    const child = { ...makeNode('n1'), position: { x: 300, y: 200 } }
+    useCanvasStore.setState({ nodes: [container, child] })
+
+    useCanvasStore.getState().setNodeParent('n1', 'px1')
+
+    const moved = useCanvasStore.getState().nodes.find((n) => n.id === 'n1')
+    expect(moved?.parentId).toBe('px1')
+    expect(moved?.extent).toBe('parent')
+    expect(moved?.data.parent_id).toBe('px1')
+    expect(moved?.position).toEqual({ x: 224, y: 148 })
+  })
+
+  it('setNodeParent moves a node from one container to another via absolute coords', () => {
+    const px1 = { ...makeNode('px1', { type: 'proxmox', container_mode: true }), position: { x: 100, y: 100 } }
+    const px2 = { ...makeNode('px2', { type: 'proxmox', container_mode: true }), position: { x: 500, y: 100 } }
+    const child = { ...makeNode('n1'), position: { x: 20, y: 20 }, parentId: 'px1', extent: 'parent' as const }
+    useCanvasStore.setState({ nodes: [px1, px2, child] })
+
+    useCanvasStore.getState().setNodeParent('n1', 'px2')
+
+    const moved = useCanvasStore.getState().nodes.find((n) => n.id === 'n1')
+    // abs = 100+20=120 ; relative to px2 = 120-500 → clamped to 8
+    expect(moved?.parentId).toBe('px2')
+    expect(moved?.position).toEqual({ x: 8, y: 20 })
+    // parent must precede child
+    const nodes = useCanvasStore.getState().nodes
+    expect(nodes.findIndex((n) => n.id === 'px2')).toBeLessThan(nodes.findIndex((n) => n.id === 'n1'))
+  })
+
+  it('setNodeParent is a no-op when target is not a container', () => {
+    const notContainer = { ...makeNode('s1', { type: 'server' }), position: { x: 0, y: 0 } }
+    const child = { ...makeNode('n1'), position: { x: 50, y: 50 } }
+    useCanvasStore.setState({ nodes: [notContainer, child] })
+    useCanvasStore.getState().markSaved()
+
+    useCanvasStore.getState().setNodeParent('n1', 's1')
+
+    expect(useCanvasStore.getState().nodes.find((n) => n.id === 'n1')?.parentId).toBeUndefined()
+    expect(useCanvasStore.getState().hasUnsavedChanges).toBe(false)
+  })
+
+  it('setNodeParent is a no-op when the parent is unchanged', () => {
+    const container = { ...makeNode('px1', { type: 'proxmox', container_mode: true }), position: { x: 0, y: 0 } }
+    const child = { ...makeNode('n1'), position: { x: 10, y: 10 }, parentId: 'px1', extent: 'parent' as const }
+    useCanvasStore.setState({ nodes: [container, child] })
+    useCanvasStore.getState().markSaved()
+
+    useCanvasStore.getState().setNodeParent('n1', 'px1')
+
+    expect(useCanvasStore.getState().hasUnsavedChanges).toBe(false)
+  })
+
+  it('setNodeParent snapshots history and marks unsaved', () => {
+    const container = { ...makeNode('px1', { type: 'proxmox', container_mode: true }), position: { x: 0, y: 0 } }
+    const child = { ...makeNode('n1'), position: { x: 10, y: 10 }, parentId: 'px1', extent: 'parent' as const }
+    useCanvasStore.setState({ nodes: [container, child] })
+    useCanvasStore.getState().markSaved()
+
+    useCanvasStore.getState().setNodeParent('n1', null)
+
+    expect(useCanvasStore.getState().past).toHaveLength(1)
+    expect(useCanvasStore.getState().hasUnsavedChanges).toBe(true)
+  })
+
   // ── removeFromGroup ─────────────────────────────────────────────────────────
 
   it('removeFromGroup releases the child to absolute coords and keeps the group', () => {

@@ -43,6 +43,7 @@ const mockStore = {
   createGroup: vi.fn(),
   ungroup: vi.fn(),
   removeFromGroup: vi.fn(),
+  setNodeParent: vi.fn(),
 }
 
 function setupStore(overrides = {}) {
@@ -135,6 +136,50 @@ describe('MultiSelectPanel', () => {
     renderPanel()
     // groupRect included → 2 nodes selected → multi-select panel shown
     expect(screen.getByText('2 nodes selected')).toBeDefined()
+  })
+})
+
+describe('DetailPanel container selector', () => {
+  beforeEach(() => vi.clearAllMocks())
+
+  function makeContainer(id: string, label: string) {
+    return { id, type: 'proxmox', position: { x: 0, y: 0 }, data: { label, type: 'proxmox', status: 'online', services: [], container_mode: true } }
+  }
+
+  it('does not show the container selector for a top-level node', () => {
+    const n1 = makeNode('n1')
+    setupStore({ nodes: [n1], selectedNodeId: 'n1', selectedNodeIds: ['n1'] })
+    renderPanel()
+    expect(screen.queryByLabelText('Container')).toBeNull()
+  })
+
+  it('shows the container selector for a nested node, defaulting to its parent', () => {
+    const px = makeContainer('px1', 'Proxmox')
+    const child = makeNode('n1', { parentId: 'px1' })
+    setupStore({ nodes: [px, child], selectedNodeId: 'n1', selectedNodeIds: ['n1'] })
+    renderPanel()
+    expect((screen.getByLabelText('Container') as HTMLSelectElement).value).toBe('px1')
+  })
+
+  it('detaches the node when "None" is selected', () => {
+    const setNodeParent = vi.fn()
+    const px = makeContainer('px1', 'Proxmox')
+    const child = makeNode('n1', { parentId: 'px1' })
+    setupStore({ nodes: [px, child], selectedNodeId: 'n1', selectedNodeIds: ['n1'], setNodeParent })
+    renderPanel()
+    fireEvent.change(screen.getByLabelText('Container'), { target: { value: '' } })
+    expect(setNodeParent).toHaveBeenCalledWith('n1', null)
+  })
+
+  it('re-parents the node when another container is selected', () => {
+    const setNodeParent = vi.fn()
+    const px1 = makeContainer('px1', 'Proxmox A')
+    const px2 = makeContainer('px2', 'Proxmox B')
+    const child = makeNode('n1', { parentId: 'px1' })
+    setupStore({ nodes: [px1, px2, child], selectedNodeId: 'n1', selectedNodeIds: ['n1'], setNodeParent })
+    renderPanel()
+    fireEvent.change(screen.getByLabelText('Container'), { target: { value: 'px2' } })
+    expect(setNodeParent).toHaveBeenCalledWith('n1', 'px2')
   })
 })
 

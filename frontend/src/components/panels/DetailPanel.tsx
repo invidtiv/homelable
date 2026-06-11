@@ -21,7 +21,7 @@ type PropForm = { key: string; value: string; icon: string | null; visible: bool
 const EMPTY_PROP: PropForm = { key: '', value: '', icon: null, visible: true }
 
 export function DetailPanel({ onEdit }: DetailPanelProps) {
-  const { nodes, selectedNodeId, selectedNodeIds, setSelectedNode, deleteNode, updateNode, snapshotHistory, createGroup, ungroup, removeFromGroup } = useCanvasStore()
+  const { nodes, selectedNodeId, selectedNodeIds, setSelectedNode, deleteNode, updateNode, snapshotHistory, createGroup, ungroup, removeFromGroup, setNodeParent } = useCanvasStore()
   const serviceStatuses = useCanvasStore((s) => s.serviceStatuses)
 
   const [addingForNode, setAddingForNode] = useState<string | null>(null)
@@ -254,6 +254,30 @@ export function DetailPanel({ onEdit }: DetailPanelProps) {
         {data.check_method && <DetailRow label="Check" value={data.check_method} mono />}
         {data.last_seen && <DetailRow label="Last Seen" value={new Date(/[Zz]|[+-]\d{2}:?\d{2}$/.test(data.last_seen) ? data.last_seen : data.last_seen + 'Z').toLocaleString()} />}
       </div>
+
+      {/* Container membership — only when the node is nested. Lets the user move
+          it to another container or detach it ("None"). */}
+      {node.parentId && (
+        <div className="px-4 py-3 border-t border-border">
+          <label htmlFor="node-container" className="text-[10px] font-semibold uppercase tracking-wider text-muted-foreground/50">
+            Container
+          </label>
+          <select
+            id="node-container"
+            aria-label="Container"
+            value={node.parentId}
+            onChange={(e) => setNodeParent(node.id, e.target.value || null)}
+            className="mt-1.5 w-full bg-[#21262d] border border-[#30363d] rounded-md text-xs h-7 px-1.5 text-foreground focus:outline-none focus:border-[#00d4ff]/50"
+          >
+            <option value="">None (detached)</option>
+            {nodes
+              .filter((n) => n.id !== node.id && (n.data.container_mode === true || n.id === node.parentId))
+              .map((n) => (
+                <option key={n.id} value={n.id}>{n.data.label ?? n.id}</option>
+              ))}
+          </select>
+        </div>
+      )}
 
       {/* Properties section */}
       <div className="px-4 py-3 border-t border-border">
