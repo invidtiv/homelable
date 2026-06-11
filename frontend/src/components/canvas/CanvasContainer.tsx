@@ -31,10 +31,11 @@ interface CanvasContainerProps {
   onNodeDoubleClick?: (node: Node<NodeData>) => void
   onNodeDragStart?: () => void
   onRequestAddToGroup?: (payload: { nodeId: string; groupId: string }) => void
+  onRequestAddToContainer?: (payload: { nodeId: string; containerId: string }) => void
   onOpenPending?: (deviceId: string) => void
 }
 
-export function CanvasContainer({ onConnect: onConnectProp, onEdgeDoubleClick, onNodeDoubleClick, onNodeDragStart, onRequestAddToGroup, onOpenPending }: CanvasContainerProps) {
+export function CanvasContainer({ onConnect: onConnectProp, onEdgeDoubleClick, onNodeDoubleClick, onNodeDragStart, onRequestAddToGroup, onRequestAddToContainer, onOpenPending }: CanvasContainerProps) {
   const [lassoMode, setLassoMode] = useState(true)
   const {
     nodes, edges,
@@ -129,13 +130,20 @@ export function CanvasContainer({ onConnect: onConnectProp, onEdgeDoubleClick, o
   // Drop a top-level node onto a group → ask App to confirm adding it. Runs
   // before the alignment snap so detection uses the dropped position.
   const handleNodeDragStop = useCallback<NonNullable<typeof onNodeDragStop>>((event, dragNode, dragNodes) => {
-    if (onRequestAddToGroup && dragNode && !dragNode.parentId &&
+    if (dragNode && !dragNode.parentId &&
         dragNode.data.type !== 'group' && dragNode.data.type !== 'groupRect') {
-      const group = getIntersectingNodes(dragNode).find((n) => n.data.type === 'group')
-      if (group) onRequestAddToGroup({ nodeId: dragNode.id, groupId: group.id })
+      const intersecting = getIntersectingNodes(dragNode)
+      const group = intersecting.find((n) => n.data.type === 'group')
+      if (group) {
+        onRequestAddToGroup?.({ nodeId: dragNode.id, groupId: group.id })
+      } else {
+        // Any node in container_mode (proxmox, docker_host, …) accepts children.
+        const container = intersecting.find((n) => n.id !== dragNode.id && n.data.container_mode === true)
+        if (container) onRequestAddToContainer?.({ nodeId: dragNode.id, containerId: container.id })
+      }
     }
     onNodeDragStop(event, dragNode, dragNodes)
-  }, [onRequestAddToGroup, getIntersectingNodes, onNodeDragStop])
+  }, [onRequestAddToGroup, onRequestAddToContainer, getIntersectingNodes, onNodeDragStop])
 
   return (
     <div className="w-full h-full" style={{ background: theme.colors.canvasBackground }} onMouseMove={onMouseMove}>

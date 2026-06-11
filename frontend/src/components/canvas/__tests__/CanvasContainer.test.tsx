@@ -207,6 +207,50 @@ describe('CanvasContainer', () => {
     expect(onRequestAddToGroup).not.toHaveBeenCalled()
   })
 
+  // ── Drag onto container node → onRequestAddToContainer ────────────────────
+
+  function containerNode(id: string, type: NodeData['type'] = 'proxmox'): Node<NodeData> {
+    return { id, type, position: { x: 0, y: 0 }, data: { label: id, type, status: 'unknown', services: [], container_mode: true } }
+  }
+
+  it('fires onRequestAddToContainer when a node is dropped over a container_mode node', () => {
+    const onRequestAddToContainer = vi.fn()
+    const node = makeNode('n1')
+    rf.intersecting = [containerNode('px1')]
+    render(<CanvasContainer onRequestAddToContainer={onRequestAddToContainer} />)
+    ;(rfProps.onNodeDragStop as (...args: unknown[]) => unknown)({} as MouseEvent, node, [node])
+    expect(onRequestAddToContainer).toHaveBeenCalledWith({ nodeId: 'n1', containerId: 'px1' })
+  })
+
+  it('prefers a group over a container when both intersect', () => {
+    const onRequestAddToGroup = vi.fn()
+    const onRequestAddToContainer = vi.fn()
+    const node = makeNode('n1')
+    rf.intersecting = [containerNode('px1'), groupNode('g1')]
+    render(<CanvasContainer onRequestAddToGroup={onRequestAddToGroup} onRequestAddToContainer={onRequestAddToContainer} />)
+    ;(rfProps.onNodeDragStop as (...args: unknown[]) => unknown)({} as MouseEvent, node, [node])
+    expect(onRequestAddToGroup).toHaveBeenCalledWith({ nodeId: 'n1', groupId: 'g1' })
+    expect(onRequestAddToContainer).not.toHaveBeenCalled()
+  })
+
+  it('does not fire onRequestAddToContainer for an already-parented node', () => {
+    const onRequestAddToContainer = vi.fn()
+    const node = { ...makeNode('n1'), parentId: 'pxOther' }
+    rf.intersecting = [containerNode('px1')]
+    render(<CanvasContainer onRequestAddToContainer={onRequestAddToContainer} />)
+    ;(rfProps.onNodeDragStop as (...args: unknown[]) => unknown)({} as MouseEvent, node, [node])
+    expect(onRequestAddToContainer).not.toHaveBeenCalled()
+  })
+
+  it('does not fire onRequestAddToContainer when the target node is not in container_mode', () => {
+    const onRequestAddToContainer = vi.fn()
+    const node = makeNode('n1')
+    rf.intersecting = [makeNode('n2')]
+    render(<CanvasContainer onRequestAddToContainer={onRequestAddToContainer} />)
+    ;(rfProps.onNodeDragStop as (...args: unknown[]) => unknown)({} as MouseEvent, node, [node])
+    expect(onRequestAddToContainer).not.toHaveBeenCalled()
+  })
+
   // ── Canvas settings ───────────────────────────────────────────────────────
 
   it('enables snapToGrid', () => {
