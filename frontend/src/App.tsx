@@ -27,6 +27,7 @@ import { TextModal, type TextFormData } from '@/components/modals/TextModal'
 import { ThemeModal } from '@/components/modals/ThemeModal'
 import { SearchModal } from '@/components/modals/SearchModal'
 import { PendingDevicesModal } from '@/components/modals/PendingDevicesModal'
+import { ScanHistoryModal } from '@/components/modals/ScanHistoryModal'
 import { ShortcutsModal } from '@/components/modals/ShortcutsModal'
 import { ConfirmAddToGroupModal } from '@/components/modals/ConfirmAddToGroupModal'
 import { useCanvasStore } from '@/stores/canvasStore'
@@ -53,7 +54,7 @@ export default function App() {
 
   const [themeModalOpen, setThemeModalOpen] = useState(false)
   const [searchOpen, setSearchOpen] = useState(false)
-  const [sidebarForceView, setSidebarForceView] = useState<'history' | undefined>(undefined)
+  const [scanHistoryOpen, setScanHistoryOpen] = useState(false)
   const [pendingModalOpen, setPendingModalOpen] = useState(false)
   const [pendingModalStatus, setPendingModalStatus] = useState<'pending' | 'hidden'>('pending')
   const [pendingHighlightId, setPendingHighlightId] = useState<string | undefined>(undefined)
@@ -610,7 +611,7 @@ export default function App() {
             onZigbeeImport={() => setZigbeeImportOpen(true)}
             onSave={handleSave}
             onOpenSettings={() => setSettingsOpen(true)}
-            forceView={sidebarForceView}
+            onOpenHistory={() => setScanHistoryOpen(true)}
             onOpenPending={openPendingModal}
           />
           <div className="flex flex-col flex-1 min-w-0">
@@ -711,8 +712,6 @@ export default function App() {
             onClose={() => setScanConfigOpen(false)}
             onScanNow={() => {
               toast.success('Network scan started — check Scan History for results')
-              setSidebarForceView(undefined)
-              setTimeout(() => setSidebarForceView('history'), 0)
             }}
           />
         )}
@@ -723,9 +722,15 @@ export default function App() {
             onClose={() => setZigbeeImportOpen(false)}
             onAddToCanvas={handleZigbeeAddToCanvas}
             onPendingImported={() => {
-              setSidebarForceView(undefined)
-              setTimeout(() => setSidebarForceView('history'), 0)
+              toast.success('Zigbee import started — check Scan History for results')
             }}
+          />
+        )}
+
+        {!STANDALONE && (
+          <ScanHistoryModal
+            open={scanHistoryOpen}
+            onClose={() => setScanHistoryOpen(false)}
           />
         )}
 
