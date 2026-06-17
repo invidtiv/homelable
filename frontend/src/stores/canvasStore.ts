@@ -289,7 +289,9 @@ export const useCanvasStore = create<CanvasState>((set) => ({
               y: Math.max(10, node.position.y - parent.position.y),
             },
           }
-        : node
+        // Not nesting: strip any parentId/extent a caller may have set so a
+        // non-container parent can't trap the node in its bounding box.
+        : { ...node, parentId: undefined, extent: undefined }
       // Parents must come before children in the array (React Flow requirement)
       const withoutNew = state.nodes.filter((n) => n.id !== node.id)
       if (enriched.parentId) {

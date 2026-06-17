@@ -150,6 +150,23 @@ describe('canvasStore', () => {
     expect(nested?.extent).toBe('parent')
   })
 
+  it('addNode strips parentId/extent when the parent is not a container', () => {
+    // Regression: a stray extent:'parent' on a non-container parent traps the
+    // node in the parent's tiny box with no way to drag it out (issue #205).
+    const parent = { ...makeNode('p1', { container_mode: false }), position: { x: 100, y: 100 } }
+    useCanvasStore.getState().addNode(parent)
+    const trapped: Node<NodeData> = {
+      ...makeNode('c1', { parent_id: 'p1' }),
+      position: { x: 150, y: 180 },
+      parentId: 'p1',
+      extent: 'parent',
+    }
+    useCanvasStore.getState().addNode(trapped)
+    const child = useCanvasStore.getState().nodes.find((n) => n.id === 'c1')
+    expect(child?.parentId).toBeUndefined()
+    expect(child?.extent).toBeUndefined()
+  })
+
   it('docker_container nests under docker_host with container_mode on', () => {
     const host = { ...makeNode('dh1', { type: 'docker_host', container_mode: true }), position: { x: 100, y: 100 } }
     const container = { ...makeNode('dc1', { type: 'docker_container' }), position: { x: 160, y: 180 } }
