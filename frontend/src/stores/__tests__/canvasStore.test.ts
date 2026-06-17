@@ -1263,4 +1263,29 @@ describe('canvasStore — custom style apply', () => {
     expect(e.data?.custom_color).toBe('#aabbcc')
     expect(useCanvasStore.getState().hasUnsavedChanges).toBe(true)
   })
+
+  it('setNodeSize sets explicit width/height and marks unsaved', () => {
+    useCanvasStore.setState({ nodes: [makeNode('n1')], hasUnsavedChanges: false })
+    useCanvasStore.getState().setNodeSize('n1', { width: 220, height: 130 })
+    const n = useCanvasStore.getState().nodes.find((x) => x.id === 'n1')!
+    expect(n.width).toBe(220)
+    expect(n.height).toBe(130)
+    expect(useCanvasStore.getState().hasUnsavedChanges).toBe(true)
+  })
+
+  it('setNodeSize clamps below the minimum box', () => {
+    useCanvasStore.setState({ nodes: [makeNode('n1')] })
+    useCanvasStore.getState().setNodeSize('n1', { width: 10, height: 10 })
+    const n = useCanvasStore.getState().nodes.find((x) => x.id === 'n1')!
+    expect(n.width).toBe(140)
+    expect(n.height).toBe(50)
+  })
+
+  it('setNodeSize updates only the provided axis', () => {
+    useCanvasStore.setState({ nodes: [{ ...makeNode('n1'), width: 200, height: 100 }] })
+    useCanvasStore.getState().setNodeSize('n1', { width: 300 })
+    const n = useCanvasStore.getState().nodes.find((x) => x.id === 'n1')!
+    expect(n.width).toBe(300)
+    expect(n.height).toBe(100)
+  })
 })
