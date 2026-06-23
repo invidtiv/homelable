@@ -7,6 +7,7 @@ import re
 import socket
 import subprocess
 import threading
+from dataclasses import dataclass, field
 from datetime import datetime, timezone
 from typing import Any
 
@@ -15,6 +16,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.db.models import Node, PendingDevice, ScanRun
 from app.services.fingerprint import fingerprint_ports, suggest_node_type
+from app.services.http_probe import probe_open_ports
 
 logger = logging.getLogger(__name__)
 
@@ -33,6 +35,37 @@ _EXTRA_PORTS = (
     "9091,9092,9093,9100,9117,9200,9300,9411,9443,9696,10051,"
     "16686,34567,37777,51413,64738"
 )
+
+# nmap -p accepts "N" or "N-M"; user ranges are validated against this.
+_PORT_RANGE_RE = re.compile(r"^\d{1,5}(-\d{1,5})?$")
+
+
+@dataclass
+class DeepScanOptions:
+    """Per-scan deep-scan settings (None/empty → standard scan, today's behaviour)."""
+
+    http_ranges: list[str] = field(default_factory=list)
+    http_probe_enabled: bool = False
+    verify_tls: bool = False
+
+
+def _valid_port_range(spec: str) -> bool:
+    if not _PORT_RANGE_RE.match(spec):
+        return False
+    parts = [int(p) for p in spec.split("-")]
+    if any(p < 1 or p > 65535 for p in parts):
+        return False
+    return len(parts) == 1 or parts[0] <= parts[1]
+
+
+def _build_port_spec(http_ranges: list[str] | None) -> str:
+    """Combine the default port list with validated user ranges for nmap -p."""
+    if not http_ranges:
+        return _EXTRA_PORTS
+    extra = [r.strip() for r in http_ranges if _valid_port_range(r.strip())]
+    if not extra:
+        return _EXTRA_PORTS
+    return _EXTRA_PORTS + "," + ",".join(extra)
 
 _MDNS_SERVICE_TYPES = [
     "_http._tcp.local.",
@@ -195,7 +228,7 @@ async def _ping_sweep(target: str) -> dict[str, dict[str, Any]]:
     return alive
 
 
-def _nmap_scan_single(host_dict: dict[str, Any]) -> dict[str, Any]:
+def _nmap_scan_single(host_dict: dict[str, Any], port_spec: str = _EXTRA_PORTS) -> dict[str, Any]:
     """
     Phase 2 — single-IP port scan with service detection.
     Runs in a thread (blocking). Returns the host dict enriched with open_ports.
@@ -210,11 +243,11 @@ def _nmap_scan_single(host_dict: dict[str, Any]) -> dict[str, Any]:
     is_root = os.geteuid() == 0
     if is_root:
         # SYN scan + version detection (fastest, most accurate)
-        scan_args = f"-sS -sV --open -T4 -Pn --host-timeout 60s -p {_EXTRA_PORTS}"
+        scan_args = f"-sS -sV --open -T4 -Pn --host-timeout 60s -p {port_spec}"
     else:
         # TCP connect scan (-sT) — no raw sockets needed, works without root.
         # nmap auto-selects -sT without root but being explicit avoids edge cases.
-        scan_args = f"-sT -sV --open -T4 -Pn --host-timeout 60s -p {_EXTRA_PORTS}"
+        scan_args = f"-sT -sV --open -T4 -Pn --host-timeout 60s -p {port_spec}"
 
     logger.debug("[Phase 2] %s args: %s", ip, scan_args)
     nm = nmap.PortScanner()
@@ -252,7 +285,9 @@ def _nmap_scan_single(host_dict: dict[str, Any]) -> dict[str, Any]:
     return host_dict
 
 
-async def _nmap_port_scan(alive: dict[str, dict[str, Any]]) -> list[dict[str, Any]]:
+async def _nmap_port_scan(
+    alive: dict[str, dict[str, Any]], port_spec: str = _EXTRA_PORTS
+) -> list[dict[str, Any]]:
     """
     Phase 2: Per-IP service detection with bounded concurrency.
     Each host is scanned independently in a thread — no inter-host timeout interference.
@@ -266,7 +301,7 @@ async def _nmap_port_scan(alive: dict[str, dict[str, Any]]) -> list[dict[str, An
 
     async def _scan_with_sem(host_dict: dict[str, Any]) -> dict[str, Any]:
         async with semaphore:
-            return await asyncio.to_thread(_nmap_scan_single, host_dict)
+            return await asyncio.to_thread(_nmap_scan_single, host_dict, port_spec)
 
     raw = await asyncio.gather(*[_scan_with_sem(h) for h in alive.values()], return_exceptions=True)
     results = []
@@ -279,7 +314,7 @@ async def _nmap_port_scan(alive: dict[str, dict[str, Any]]) -> list[dict[str, An
     return results
 
 
-async def _nmap_scan(target: str) -> list[dict[str, Any]]:
+async def _nmap_scan(target: str, port_spec: str = _EXTRA_PORTS) -> list[dict[str, Any]]:
     """
     Two-phase scan for a CIDR range.
     Phase 1: Concurrent ping sweep to find alive hosts (fast, no false positives).
@@ -296,7 +331,7 @@ async def _nmap_scan(target: str) -> list[dict[str, Any]]:
     except Exception as exc:
         logger.error("Phase 1 ping sweep failed: %s", exc)
         raise RuntimeError(str(exc)) from exc
-    return await _nmap_port_scan(alive)
+    return await _nmap_port_scan(alive, port_spec)
 
 
 async def _mdns_discover(timeout: float = 4.0) -> list[dict[str, Any]]:
@@ -375,9 +410,17 @@ def _mock_scan(target: str) -> list[dict[str, Any]]:
     ]
 
 
-async def run_scan(ranges: list[str], db: AsyncSession, run_id: str) -> None:
+async def run_scan(
+    ranges: list[str],
+    db: AsyncSession,
+    run_id: str,
+    deep_scan: DeepScanOptions | None = None,
+) -> None:
     """Execute scan for given CIDR ranges and populate pending_devices."""
     from app.api.routes.status import broadcast_scan_update
+
+    deep_scan = deep_scan or DeepScanOptions()
+    port_spec = _build_port_spec(deep_scan.http_ranges)
 
     devices_found = 0
     mdns_task: asyncio.Task[list[dict[str, Any]]] | None = None
@@ -427,8 +470,17 @@ async def run_scan(ranges: list[str], db: AsyncSession, run_id: str) -> None:
                 logger.debug("Skipping %s — hidden by user", ip)
                 return
 
-            services = fingerprint_ports(host["open_ports"])
-            suggested_type = suggest_node_type(host["open_ports"], host.get("mac"))
+            open_ports = host["open_ports"]
+            # Deep-scan HTTP probe: enrich open ports with title/header signals so
+            # fingerprint can confirm services on custom ports. No-op when disabled
+            # or when the host has no open ports (e.g. mDNS-only discovery).
+            if deep_scan.http_probe_enabled and open_ports:
+                open_ports = await probe_open_ports(
+                    ip, open_ports, verify_tls=deep_scan.verify_tls
+                )
+
+            services = fingerprint_ports(open_ports)
+            suggested_type = suggest_node_type(open_ports, host.get("mac"))
 
             existing_result = await db.execute(
                 select(PendingDevice).where(
@@ -463,7 +515,7 @@ async def run_scan(ranges: list[str], db: AsyncSession, run_id: str) -> None:
         for cidr in ranges:
             if _is_cancelled(run_id):
                 break
-            hosts = await _nmap_scan(cidr)
+            hosts = await _nmap_scan(cidr, port_spec)
             for host in hosts:
                 if _is_cancelled(run_id):
                     break

@@ -518,7 +518,7 @@ async def test_run_scan_cancelled_mid_scan_skips_remaining_cidrs(db_session: Asy
 
     call_count = 0
 
-    def nmap_side_effect(target: str):
+    def nmap_side_effect(target: str, port_spec: str | None = None):
         nonlocal call_count
         call_count += 1
         # Signal cancellation after the first CIDR scan completes
