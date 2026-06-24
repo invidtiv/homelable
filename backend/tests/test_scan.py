@@ -122,7 +122,8 @@ async def test_background_scan_success_path_invokes_run_scan(mem_db):
         patch("app.api.routes.scan.AsyncSessionLocal", mem_db),
         patch("app.api.routes.scan.run_scan", new_callable=AsyncMock) as mock_run_scan,
     ):
-        await _background_scan(run_id, ["10.0.0.0/24"])
+        from app.services.scanner import DeepScanOptions
+        await _background_scan(run_id, ["10.0.0.0/24"], DeepScanOptions())
         mock_run_scan.assert_awaited_once()
 
 
@@ -1122,3 +1123,114 @@ async def test_approve_zigbee_resolves_link_after_second_approval(
     assert len(edges) == 1
     links = (await db_session.execute(select(PendingDeviceLink))).scalars().all()
     assert links == []  # consumed
+
+
+# --- Deep scan: trigger overrides + config persistence ---
+
+@pytest.mark.asyncio
+async def test_resolve_deep_scan_falls_back_to_settings():
+    from app.api.routes.scan import TriggerScanRequest, _resolve_deep_scan
+
+    with patch("app.api.routes.scan.settings") as mock_settings:
+        mock_settings.scanner_http_ranges = ["7000-7100"]
+        mock_settings.scanner_http_probe_enabled = True
+        mock_settings.scanner_http_verify_tls = False
+        # Empty payload → all values come from settings defaults
+        ds = _resolve_deep_scan(TriggerScanRequest())
+    assert ds.http_ranges == ["7000-7100"]
+    assert ds.http_probe_enabled is True
+    assert ds.verify_tls is False
+
+
+@pytest.mark.asyncio
+async def test_resolve_deep_scan_override_wins():
+    from app.api.routes.scan import TriggerScanRequest, _resolve_deep_scan
+
+    with patch("app.api.routes.scan.settings") as mock_settings:
+        mock_settings.scanner_http_ranges = []
+        mock_settings.scanner_http_probe_enabled = False
+        mock_settings.scanner_http_verify_tls = False
+        ds = _resolve_deep_scan(
+            TriggerScanRequest(http_ranges=["9000"], http_probe_enabled=True, verify_tls=True)
+        )
+    assert ds.http_ranges == ["9000"]
+    assert ds.http_probe_enabled is True
+    assert ds.verify_tls is True
+
+
+@pytest.mark.asyncio
+async def test_trigger_scan_passes_deep_scan_options(client: AsyncClient, headers):
+    captured = {}
+
+    async def fake_bg(run_id, ranges, deep_scan):
+        captured["deep_scan"] = deep_scan
+
+    with (
+        patch("app.api.routes.scan._background_scan", new=fake_bg),
+        patch("app.api.routes.scan.settings") as mock_settings,
+    ):
+        mock_settings.scanner_ranges = ["192.168.1.0/24"]
+        mock_settings.scanner_http_ranges = []
+        mock_settings.scanner_http_probe_enabled = False
+        mock_settings.scanner_http_verify_tls = False
+        res = await client.post(
+            "/api/v1/scan/trigger",
+            json={"http_probe_enabled": True, "http_ranges": ["8000-8100"]},
+            headers=headers,
+        )
+    assert res.status_code == 200
+    assert captured["deep_scan"].http_probe_enabled is True
+    assert captured["deep_scan"].http_ranges == ["8000-8100"]
+
+
+@pytest.mark.asyncio
+async def test_trigger_scan_rejects_invalid_port_range(client: AsyncClient, headers):
+    with patch("app.api.routes.scan.settings") as mock_settings:
+        mock_settings.scanner_ranges = ["192.168.1.0/24"]
+        res = await client.post(
+            "/api/v1/scan/trigger",
+            json={"http_ranges": ["70000-80000"]},
+            headers=headers,
+        )
+    assert res.status_code == 422
+
+
+@pytest.mark.asyncio
+async def test_get_scan_config_includes_deep_scan(client: AsyncClient, headers):
+    with patch("app.api.routes.scan.settings") as mock_settings:
+        mock_settings.scanner_ranges = ["192.168.1.0/24"]
+        mock_settings.scanner_http_ranges = ["8000-8100"]
+        mock_settings.scanner_http_probe_enabled = True
+        mock_settings.scanner_http_verify_tls = False
+        res = await client.get("/api/v1/scan/config", headers=headers)
+    assert res.status_code == 200
+    data = res.json()
+    assert data["http_ranges"] == ["8000-8100"]
+    assert data["http_probe_enabled"] is True
+
+
+@pytest.mark.asyncio
+async def test_update_scan_config_persists_deep_scan(client: AsyncClient, headers):
+    saved = {}
+
+    with patch("app.api.routes.scan.settings") as mock_settings:
+        mock_settings.scanner_ranges = ["192.168.1.0/24"]
+        mock_settings.scanner_http_ranges = []
+        mock_settings.scanner_http_probe_enabled = False
+        mock_settings.scanner_http_verify_tls = False
+        mock_settings.save_overrides = lambda: saved.update(
+            http_ranges=mock_settings.scanner_http_ranges,
+            probe=mock_settings.scanner_http_probe_enabled,
+        )
+        res = await client.post(
+            "/api/v1/scan/config",
+            json={
+                "ranges": ["192.168.1.0/24"],
+                "http_ranges": ["9000-9100"],
+                "http_probe_enabled": True,
+                "verify_tls": True,
+            },
+            headers=headers,
+        )
+    assert res.status_code == 200
+    assert saved == {"http_ranges": ["9000-9100"], "probe": True}

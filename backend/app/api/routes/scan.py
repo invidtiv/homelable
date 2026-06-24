@@ -14,7 +14,7 @@ from app.db.database import AsyncSessionLocal, get_db
 from app.db.models import Design, Edge, Node, PendingDevice, PendingDeviceLink, ScanRun
 from app.schemas.nodes import NodeCreate
 from app.schemas.scan import PendingDeviceResponse, ScanRunResponse
-from app.services.scanner import request_cancel, run_scan
+from app.services.scanner import DeepScanOptions, _valid_port_range, request_cancel, run_scan
 from app.services.zigbee_service import build_zigbee_properties
 
 _ZIGBEE_TYPES = {"zigbee_coordinator", "zigbee_router", "zigbee_enddevice"}
@@ -52,8 +52,20 @@ class BulkActionRequest(BaseModel):
     device_ids: list[str]
 
 
+def _check_port_ranges(v: list[str]) -> list[str]:
+    for r in v:
+        if not _valid_port_range(r.strip()):
+            raise ValueError(f"Invalid port range: {r!r}")
+    return v
+
+
 class ScanConfig(BaseModel):
+    """Persisted scan defaults (Options page). Deep-scan fields are optional."""
+
     ranges: list[str]
+    http_ranges: list[str] = []
+    http_probe_enabled: bool = False
+    verify_tls: bool = False
 
     @field_validator("ranges")
     @classmethod
@@ -65,15 +77,35 @@ class ScanConfig(BaseModel):
                 raise ValueError(f"Invalid CIDR range: {r!r}") from exc
         return v
 
+    @field_validator("http_ranges")
+    @classmethod
+    def validate_http_ranges(cls, v: list[str]) -> list[str]:
+        return _check_port_ranges(v)
+
+
+class TriggerScanRequest(BaseModel):
+    """Per-scan deep-scan overrides (scan dialog). None → use persisted default."""
+
+    http_ranges: list[str] | None = None
+    http_probe_enabled: bool | None = None
+    verify_tls: bool | None = None
+
+    @field_validator("http_ranges")
+    @classmethod
+    def validate_http_ranges(cls, v: list[str] | None) -> list[str] | None:
+        return None if v is None else _check_port_ranges(v)
+
 
 logger = logging.getLogger(__name__)
 router = APIRouter()
 
 
-async def _background_scan(run_id: str, ranges: list[str]) -> None:
+async def _background_scan(
+    run_id: str, ranges: list[str], deep_scan: DeepScanOptions | None = None
+) -> None:
     async with AsyncSessionLocal() as db:
         try:
-            await run_scan(ranges, db, run_id)
+            await run_scan(ranges, db, run_id, deep_scan=deep_scan or DeepScanOptions())
         except Exception:
             logger.exception("Scan run %s failed unexpectedly", run_id)
             await db.rollback()
@@ -83,18 +115,38 @@ async def _background_scan(run_id: str, ranges: list[str]) -> None:
                 await db.commit()
 
 
+def _resolve_deep_scan(payload: TriggerScanRequest | None) -> DeepScanOptions:
+    """Merge per-scan overrides over persisted settings defaults."""
+    p = payload or TriggerScanRequest()
+    return DeepScanOptions(
+        http_ranges=(
+            p.http_ranges if p.http_ranges is not None else settings.scanner_http_ranges
+        ),
+        http_probe_enabled=(
+            p.http_probe_enabled
+            if p.http_probe_enabled is not None
+            else settings.scanner_http_probe_enabled
+        ),
+        verify_tls=(
+            p.verify_tls if p.verify_tls is not None else settings.scanner_http_verify_tls
+        ),
+    )
+
+
 @router.post("/trigger", response_model=ScanRunResponse)
 async def trigger_scan(
     background_tasks: BackgroundTasks,
+    payload: TriggerScanRequest | None = None,
     db: AsyncSession = Depends(get_db),
     _: str = Depends(get_current_user),
 ) -> ScanRun:
     ranges = settings.scanner_ranges
+    deep_scan = _resolve_deep_scan(payload)
     run = ScanRun(status="running", ranges=ranges)
     db.add(run)
     await db.commit()
     await db.refresh(run)
-    background_tasks.add_task(_background_scan, run.id, ranges)
+    background_tasks.add_task(_background_scan, run.id, ranges, deep_scan)
     return run
 
 
@@ -427,17 +479,35 @@ async def list_runs(db: AsyncSession = Depends(get_db), _: str = Depends(get_cur
 
 @router.get("/config", response_model=ScanConfig)
 async def get_scan_config(_: str = Depends(get_current_user)) -> ScanConfig:
-    return ScanConfig(ranges=settings.scanner_ranges)
+    return ScanConfig(
+        ranges=settings.scanner_ranges,
+        http_ranges=settings.scanner_http_ranges,
+        http_probe_enabled=settings.scanner_http_probe_enabled,
+        verify_tls=settings.scanner_http_verify_tls,
+    )
 
 
 @router.post("/config", response_model=ScanConfig)
 async def update_scan_config(payload: ScanConfig, _: str = Depends(get_current_user)) -> ScanConfig:
-    previous = settings.scanner_ranges
+    previous = (
+        settings.scanner_ranges,
+        settings.scanner_http_ranges,
+        settings.scanner_http_probe_enabled,
+        settings.scanner_http_verify_tls,
+    )
     settings.scanner_ranges = payload.ranges
+    settings.scanner_http_ranges = payload.http_ranges
+    settings.scanner_http_probe_enabled = payload.http_probe_enabled
+    settings.scanner_http_verify_tls = payload.verify_tls
     try:
         settings.save_overrides()
         return payload
     except Exception as exc:
-        settings.scanner_ranges = previous
+        (
+            settings.scanner_ranges,
+            settings.scanner_http_ranges,
+            settings.scanner_http_probe_enabled,
+            settings.scanner_http_verify_tls,
+        ) = previous
         logger.error("Failed to save scan config: %s", exc)
         raise HTTPException(status_code=500, detail="Failed to save scan config") from exc
