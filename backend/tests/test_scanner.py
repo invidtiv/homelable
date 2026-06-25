@@ -457,8 +457,9 @@ async def test_run_scan_mdns_skipped_if_already_in_nmap(mem_db):
 
 
 @pytest.mark.asyncio
-async def test_run_scan_skips_canvas_nodes(mem_db):
-    """Hosts already approved onto the canvas must be skipped."""
+async def test_run_scan_keeps_canvas_nodes(mem_db):
+    """Hosts already on a canvas are NOT suppressed — they stay in the inventory
+    (badged "In N canvas" via correlation), so a re-scan still records them."""
     from app.services.scanner import run_scan
 
     run_id = _make_run_id()
@@ -481,7 +482,9 @@ async def test_run_scan_skips_canvas_nodes(mem_db):
 
     async with mem_db() as session:
         result = await session.execute(sa_select(PendingDevice).where(PendingDevice.ip == "192.168.1.100"))
-        assert result.scalar_one_or_none() is None
+        device = result.scalar_one_or_none()
+        assert device is not None
+        assert device.status == "pending"
 
 
 @pytest.mark.asyncio

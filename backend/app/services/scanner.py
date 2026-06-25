@@ -14,7 +14,7 @@ from typing import Any
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.db.models import Node, PendingDevice, ScanRun
+from app.db.models import PendingDevice, ScanRun
 from app.services.fingerprint import fingerprint_ports, suggest_node_type
 from app.services.http_probe import probe_open_ports
 
@@ -432,25 +432,13 @@ async def run_scan(
             except ValueError:
                 raise ValueError(f"Invalid CIDR range: {r!r}") from None
 
-        # Pre-fetch canvas IPs and hidden IPs once — avoids N+1 queries per host
-        canvas_ips_result = await db.execute(select(Node.ip).where(Node.ip.isnot(None)))
-        canvas_ips: set[str] = {row[0] for row in canvas_ips_result.fetchall()}
-
+        # Pre-fetch hidden IPs once — avoids N+1 queries per host.
+        # Devices already on a canvas are intentionally NOT suppressed: they stay
+        # in the inventory and are badged "In N canvas" via per-request correlation.
         hidden_ips_result = await db.execute(
             select(PendingDevice.ip).where(PendingDevice.status == "hidden")
         )
         hidden_ips: set[str] = {row[0] for row in hidden_ips_result.fetchall()}
-
-        # Clean up stale pending devices whose IPs are already in the canvas
-        if canvas_ips:
-            from sqlalchemy import delete as sa_delete
-            await db.execute(
-                sa_delete(PendingDevice).where(
-                    PendingDevice.status == "pending",
-                    PendingDevice.ip.in_(canvas_ips),
-                )
-            )
-            await db.commit()
 
         # Start mDNS discovery in the background while nmap scans run
         mdns_task = asyncio.create_task(_mdns_discover())
@@ -462,10 +450,8 @@ async def run_scan(
             nonlocal devices_found
             ip = host["ip"]
 
-            # Skip canvas nodes and user-hidden devices (sets pre-fetched before loop)
-            if ip in canvas_ips:
-                logger.debug("Skipping %s — already in canvas", ip)
-                return
+            # Skip only user-hidden devices. On-canvas devices are kept so they
+            # surface in the inventory with a canvas-presence badge.
             if ip in hidden_ips:
                 logger.debug("Skipping %s — hidden by user", ip)
                 return

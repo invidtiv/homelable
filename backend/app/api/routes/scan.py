@@ -169,10 +169,60 @@ async def stop_scan(
     return {"stopping": True}
 
 
+async def _canvas_counts(
+    db: AsyncSession, devices: list[PendingDevice]
+) -> dict[str, int]:
+    """Map each device id → number of distinct canvases (designs) it appears on.
+
+    Correlates a scanned device to existing nodes by ``ieee_address`` (exact) or
+    ``ip`` (exact). Runs a single node query and groups in Python — node counts are
+    small for a homelab, so this avoids an N+1 per device.
+    """
+    if not devices:
+        return {}
+    rows = (
+        await db.execute(
+            select(Node.ip, Node.ieee_address, Node.design_id).where(
+                Node.design_id.isnot(None)
+            )
+        )
+    ).all()
+    # ip → set(design_id), ieee → set(design_id)
+    by_ip: dict[str, set[str]] = {}
+    by_ieee: dict[str, set[str]] = {}
+    for ip, ieee, design_id in rows:
+        if ip:
+            by_ip.setdefault(ip, set()).add(design_id)
+        if ieee:
+            by_ieee.setdefault(ieee, set()).add(design_id)
+
+    counts: dict[str, int] = {}
+    for d in devices:
+        designs: set[str] = set()
+        if d.ieee_address:
+            designs |= by_ieee.get(d.ieee_address, set())
+        if d.ip:
+            designs |= by_ip.get(d.ip, set())
+        counts[d.id] = len(designs)
+    return counts
+
+
+async def _with_canvas_counts(
+    db: AsyncSession, devices: list[PendingDevice]
+) -> list[PendingDevice]:
+    """Attach a transient ``canvas_count`` to each device for the response schema."""
+    counts = await _canvas_counts(db, devices)
+    for d in devices:
+        d.canvas_count = counts.get(d.id, 0)
+    return devices
+
+
 @router.get("/pending", response_model=list[PendingDeviceResponse])
 async def list_pending(db: AsyncSession = Depends(get_db), _: str = Depends(get_current_user)) -> list[PendingDevice]:
-    result = await db.execute(select(PendingDevice).where(PendingDevice.status == "pending"))
-    return list(result.scalars().all())
+    # Inventory: every scanned device except the user-hidden ones. Approved devices
+    # stay listed so they keep showing with a canvas-presence badge.
+    result = await db.execute(select(PendingDevice).where(PendingDevice.status != "hidden"))
+    return await _with_canvas_counts(db, list(result.scalars().all()))
 
 
 @router.delete("/pending", response_model=dict)
@@ -189,7 +239,7 @@ async def clear_pending(
 @router.get("/hidden", response_model=list[PendingDeviceResponse])
 async def list_hidden(db: AsyncSession = Depends(get_db), _: str = Depends(get_current_user)) -> list[PendingDevice]:
     result = await db.execute(select(PendingDevice).where(PendingDevice.status == "hidden"))
-    return list(result.scalars().all())
+    return await _with_canvas_counts(db, list(result.scalars().all()))
 
 
 @router.post("/pending/bulk-approve", response_model=dict)

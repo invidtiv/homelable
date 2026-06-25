@@ -7,7 +7,7 @@ from httpx import AsyncClient
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.db.models import Node, PendingDevice, ScanRun
+from app.db.models import Design, Node, PendingDevice, ScanRun
 from app.services.scanner import _cancelled_runs, request_cancel, run_scan
 
 
@@ -167,6 +167,66 @@ async def test_list_pending_returns_device(client: AsyncClient, headers, pending
     assert len(data) == 1
     assert data[0]["ip"] == "192.168.1.100"
     assert data[0]["hostname"] == "my-server"
+    # No matching node → not on any canvas.
+    assert data[0]["canvas_count"] == 0
+
+
+# --- Canvas-presence correlation (canvas_count) ---
+
+async def _add_design(db_session, name: str) -> str:
+    design = Design(id=str(uuid.uuid4()), name=name)
+    db_session.add(design)
+    await db_session.commit()
+    return design.id
+
+
+def _node(design_id: str, *, ip=None, ieee=None) -> Node:
+    return Node(
+        id=str(uuid.uuid4()), label="n", type="server", status="online",
+        ip=ip, ieee_address=ieee, services=[], pos_x=0.0, pos_y=0.0,
+        design_id=design_id,
+    )
+
+
+@pytest.mark.asyncio
+async def test_canvas_count_counts_distinct_designs_by_ip(client, headers, db_session, pending_device):
+    # Same IP placed on two different canvases → canvas_count == 2.
+    d1 = await _add_design(db_session, "Home")
+    d2 = await _add_design(db_session, "Lab")
+    db_session.add(_node(d1, ip="192.168.1.100"))
+    db_session.add(_node(d2, ip="192.168.1.100"))
+    await db_session.commit()
+
+    res = await client.get("/api/v1/scan/pending", headers=headers)
+    data = res.json()
+    assert len(data) == 1
+    assert data[0]["canvas_count"] == 2
+
+
+@pytest.mark.asyncio
+async def test_canvas_count_correlates_by_ieee(client, headers, db_session):
+    device = PendingDevice(
+        id=str(uuid.uuid4()), ieee_address="0x00124b001", discovery_source="zigbee",
+        suggested_type="zigbee_enddevice", services=[], status="pending",
+    )
+    db_session.add(device)
+    d1 = await _add_design(db_session, "Zigbee")
+    db_session.add(_node(d1, ieee="0x00124b001"))
+    await db_session.commit()
+
+    res = await client.get("/api/v1/scan/pending", headers=headers)
+    by_id = {d["id"]: d for d in res.json()}
+    assert by_id[device.id]["canvas_count"] == 1
+
+
+@pytest.mark.asyncio
+async def test_canvas_count_ignores_nodes_without_design(client, headers, db_session, pending_device):
+    # A node with no design_id is not "on a canvas".
+    db_session.add(_node(None, ip="192.168.1.100"))
+    await db_session.commit()
+
+    res = await client.get("/api/v1/scan/pending", headers=headers)
+    assert res.json()[0]["canvas_count"] == 0
 
 
 # --- Approve device ---
@@ -191,9 +251,13 @@ async def test_approve_device(client: AsyncClient, headers, pending_device):
     assert data["approved"] is True
     assert "node_id" in data
 
-    # Device should no longer appear in pending list
+    # Approved devices stay in the inventory (status != "hidden") so they keep
+    # showing with an "In N canvas" badge — they are no longer dropped.
     pending_res = await client.get("/api/v1/scan/pending", headers=headers)
-    assert pending_res.json() == []
+    inventory = pending_res.json()
+    assert len(inventory) == 1
+    assert inventory[0]["id"] == pending_device.id
+    assert inventory[0]["status"] == "approved"
 
 
 @pytest.mark.asyncio
@@ -332,8 +396,9 @@ async def test_run_scan_creates_new_pending_device(db_session: AsyncSession):
 
 
 @pytest.mark.asyncio
-async def test_run_scan_purges_stale_pending_for_canvas_nodes(db_session: AsyncSession):
-    """Pending devices that were already in canvas before scan starts must be removed."""
+async def test_run_scan_keeps_stale_pending_for_canvas_nodes(db_session: AsyncSession):
+    """Pending devices whose IP is already on a canvas are NOT purged — they stay
+    in the inventory and are surfaced with an "In N canvas" badge."""
     node = Node(
         id=str(uuid.uuid4()),
         label="Existing Server",
@@ -372,12 +437,13 @@ async def test_run_scan_purges_stale_pending_for_canvas_nodes(db_session: AsyncS
     result = await db_session.execute(
         select(PendingDevice).where(PendingDevice.ip == "192.168.1.50")
     )
-    assert result.scalar_one_or_none() is None
+    assert result.scalar_one_or_none() is not None
 
 
 @pytest.mark.asyncio
-async def test_run_scan_skips_ip_already_in_canvas(db_session: AsyncSession):
-    """Devices whose IP already exists as a canvas Node must not appear in pending."""
+async def test_run_scan_records_ip_already_in_canvas(db_session: AsyncSession):
+    """A scanned IP that already exists as a canvas Node still produces a pending
+    device (no longer suppressed)."""
     node = Node(
         id=str(uuid.uuid4()),
         label="Existing Server",
@@ -405,7 +471,9 @@ async def test_run_scan_skips_ip_already_in_canvas(db_session: AsyncSession):
     result = await db_session.execute(
         select(PendingDevice).where(PendingDevice.ip == "192.168.1.50")
     )
-    assert result.scalar_one_or_none() is None
+    device = result.scalar_one_or_none()
+    assert device is not None
+    assert device.status == "pending"
 
 
 @pytest.mark.asyncio
@@ -613,9 +681,11 @@ async def test_bulk_approve_approves_devices(client: AsyncClient, headers, two_p
     assert all(nid is not None for nid in data["node_ids"]), "node_ids must be non-null UUIDs"
     assert len(data["device_ids"]) == 2
     assert data["skipped"] == 0
-    # Pending list should now be empty
+    # Approved devices stay in the inventory, now marked "approved".
     pending_res = await client.get("/api/v1/scan/pending", headers=headers)
-    assert pending_res.json() == []
+    inventory = pending_res.json()
+    assert len(inventory) == 2
+    assert all(d["status"] == "approved" for d in inventory)
 
 
 @pytest.fixture
