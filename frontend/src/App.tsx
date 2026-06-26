@@ -6,6 +6,7 @@ import { serializeNode, serializeEdge, deserializeApiNode, deserializeApiEdge, t
 import { generateUUID } from '@/utils/uuid'
 import { resolveVirtualEdgeParent } from '@/utils/virtualEdgeParent'
 import { generateMarkdownTable } from '@/utils/exportMarkdown'
+import { copyToClipboard } from '@/utils/clipboard'
 import { ExportModal } from '@/components/modals/ExportModal'
 import { exportCanvasToYaml, downloadYaml } from '@/utils/exportYaml'
 import { parseYamlToCanvas } from '@/utils/importYaml'
@@ -445,8 +446,11 @@ export default function App() {
   const handleExportMd = useCallback(async () => {
     const md = generateMarkdownTable(nodes)
     if (!md) { toast.error('No nodes to export'); return }
-    await navigator.clipboard.writeText(md)
-    toast.success('Markdown table copied to clipboard')
+    if (await copyToClipboard(md)) {
+      toast.success('Markdown table copied to clipboard')
+    } else {
+      toast.error('Markdown copy failed')
+    }
   }, [nodes])
 
   const handleExportYaml = useCallback(() => {
