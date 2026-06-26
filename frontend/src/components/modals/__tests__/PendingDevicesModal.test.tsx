@@ -67,6 +67,23 @@ const DEVICE_ZIGBEE = {
   discovered_at: '2026-01-02T00:00:00Z',
 }
 
+const DEVICE_ZWAVE = {
+  id: 'dev-c',
+  ip: null,
+  hostname: null,
+  mac: null,
+  os: null,
+  services: [],
+  suggested_type: 'zwave_router',
+  status: 'pending',
+  discovery_source: 'zwave',
+  ieee_address: 'zwave-0xh-2',
+  friendly_name: 'wall-plug',
+  vendor: 'Aeotec',
+  model: 'ZW100',
+  discovered_at: '2026-01-03T00:00:00Z',
+}
+
 beforeEach(() => {
   vi.clearAllMocks()
   vi.mocked(useCanvasStore).mockReturnValue({
@@ -127,6 +144,22 @@ describe('PendingDevicesModal', () => {
     fireEvent.click(screen.getByRole('button', { name: 'Zigbee' }))
     expect(screen.queryByTestId('pending-card-dev-a')).not.toBeInTheDocument()
     expect(screen.getByTestId('pending-card-dev-b')).toBeInTheDocument()
+  })
+
+  it('shows source chip Z-WAVE for zwave device', async () => {
+    mockPending.mockResolvedValue({ data: [DEVICE_IP, DEVICE_ZWAVE] })
+    render(<PendingDevicesModal {...baseProps} />)
+    await waitFor(() => expect(screen.getByTestId('pending-card-dev-c')).toBeInTheDocument())
+    expect(screen.getByText('Z-WAVE')).toBeInTheDocument()
+  })
+
+  it('filters by source (zwave only)', async () => {
+    mockPending.mockResolvedValue({ data: [DEVICE_IP, DEVICE_ZWAVE] })
+    render(<PendingDevicesModal {...baseProps} />)
+    await waitFor(() => expect(screen.getByTestId('pending-card-dev-a')).toBeInTheDocument())
+    fireEvent.click(screen.getByRole('button', { name: 'Z-Wave' }))
+    expect(screen.queryByTestId('pending-card-dev-a')).not.toBeInTheDocument()
+    expect(screen.getByTestId('pending-card-dev-c')).toBeInTheDocument()
   })
 
   it('filters by suggested type', async () => {

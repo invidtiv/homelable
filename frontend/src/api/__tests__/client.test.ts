@@ -217,4 +217,14 @@ describe('api/client', () => {
     mod.zigbeeApi.importToPending(cfg)
     expect(api.post).toHaveBeenCalledWith('/zigbee/import-pending', cfg)
   })
+
+  it('zwaveApi.testConnection/importNetwork/importToPending', () => {
+    const cfg = { mqtt_host: 'h', mqtt_port: 1883, prefix: 'zwave', gateway_name: 'zwavejs2mqtt' }
+    mod.zwaveApi.testConnection(cfg)
+    expect(api.post).toHaveBeenCalledWith('/zwave/test-connection', cfg)
+    mod.zwaveApi.importNetwork(cfg)
+    expect(api.post).toHaveBeenCalledWith('/zwave/import', cfg)
+    mod.zwaveApi.importToPending(cfg)
+    expect(api.post).toHaveBeenCalledWith('/zwave/import-pending', cfg)
+  })
 })

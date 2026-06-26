@@ -70,6 +70,7 @@ const defaultProps = {
   onAddText: vi.fn(),
   onScan: vi.fn(),
   onZigbeeImport: vi.fn(),
+  onZwaveImport: vi.fn(),
   onSave: vi.fn(),
   onOpenSettings: vi.fn(),
   onOpenHistory: vi.fn(),
@@ -182,6 +183,12 @@ describe('Sidebar', () => {
     render(<Sidebar {...defaultProps} />)
     fireEvent.click(screen.getByText('Add Zone'))
     expect(defaultProps.onAddGroupRect).toHaveBeenCalledOnce()
+  })
+
+  it('calls onZwaveImport when Z-Wave Import is clicked', () => {
+    render(<Sidebar {...defaultProps} />)
+    fireEvent.click(screen.getByText('Z-Wave Import'))
+    expect(defaultProps.onZwaveImport).toHaveBeenCalledOnce()
   })
 
   it('calls onSave when Save Canvas is clicked', () => {

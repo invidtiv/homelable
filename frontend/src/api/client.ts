@@ -164,3 +164,52 @@ export const zigbeeApi = {
       error: string | null
     }>('/zigbee/import-pending', data),
 }
+
+export const zwaveApi = {
+  testConnection: (data: {
+    mqtt_host: string
+    mqtt_port: number
+    mqtt_username?: string
+    mqtt_password?: string
+    mqtt_tls?: boolean
+    mqtt_tls_insecure?: boolean
+  }) =>
+    api.post<{ connected: boolean; message: string }>('/zwave/test-connection', data),
+
+  importNetwork: (data: {
+    mqtt_host: string
+    mqtt_port: number
+    mqtt_username?: string
+    mqtt_password?: string
+    prefix?: string
+    gateway_name?: string
+    mqtt_tls?: boolean
+    mqtt_tls_insecure?: boolean
+  }) =>
+    api.post<{
+      nodes: import('@/components/zwave/types').ZwaveNode[]
+      edges: import('@/components/zwave/types').ZwaveEdge[]
+      device_count: number
+    }>('/zwave/import', data),
+
+  importToPending: (data: {
+    mqtt_host: string
+    mqtt_port: number
+    mqtt_username?: string
+    mqtt_password?: string
+    prefix?: string
+    gateway_name?: string
+    mqtt_tls?: boolean
+    mqtt_tls_insecure?: boolean
+  }) =>
+    api.post<{
+      id: string
+      status: string
+      kind: string
+      ranges: string[]
+      devices_found: number
+      started_at: string
+      finished_at: string | null
+      error: string | null
+    }>('/zwave/import-pending', data),
+}
