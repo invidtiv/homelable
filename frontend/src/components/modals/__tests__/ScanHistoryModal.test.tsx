@@ -61,6 +61,17 @@ const ZIGBEE_RUN = {
   error: null,
 }
 
+const ZWAVE_RUN = {
+  id: 'run-5',
+  status: 'done',
+  kind: 'zwave',
+  ranges: [],
+  devices_found: 5,
+  started_at: new Date().toISOString(),
+  finished_at: new Date().toISOString(),
+  error: null,
+}
+
 function renderModal() {
   return render(
     <TooltipProvider>
@@ -153,6 +164,16 @@ describe('ScanHistoryModal', () => {
     fireEvent.click(screen.getByRole('button', { name: 'Zigbee' }))
     // Only the zigbee run (7 found) remains
     expect(screen.getByText('7 found')).toBeDefined()
+    expect(screen.queryByText('3 found')).toBeNull()
+  })
+
+  it('filters by zwave kind', async () => {
+    vi.mocked(scanApi.runs).mockResolvedValue({ data: [DONE_RUN, ZWAVE_RUN] } as never)
+    renderModal()
+    await waitFor(() => expect(screen.getAllByText('done').length).toBe(2))
+    fireEvent.click(screen.getByRole('button', { name: 'Z-Wave' }))
+    // Only the zwave run (5 found) remains
+    expect(screen.getByText('5 found')).toBeDefined()
     expect(screen.queryByText('3 found')).toBeNull()
   })
 })
