@@ -67,6 +67,23 @@ const DEVICE_ZIGBEE = {
   discovered_at: '2026-01-02T00:00:00Z',
 }
 
+const DEVICE_ZWAVE = {
+  id: 'dev-c',
+  ip: null,
+  hostname: null,
+  mac: null,
+  os: null,
+  services: [],
+  suggested_type: 'zwave_router',
+  status: 'pending',
+  discovery_source: 'zwave',
+  ieee_address: 'zwave-0xh-2',
+  friendly_name: 'wall-plug',
+  vendor: 'Aeotec',
+  model: 'ZW100',
+  discovered_at: '2026-01-03T00:00:00Z',
+}
+
 beforeEach(() => {
   vi.clearAllMocks()
   vi.mocked(useCanvasStore).mockReturnValue({
@@ -129,6 +146,22 @@ describe('PendingDevicesModal', () => {
     expect(screen.getByTestId('pending-card-dev-b')).toBeInTheDocument()
   })
 
+  it('shows source chip Z-WAVE for zwave device', async () => {
+    mockPending.mockResolvedValue({ data: [DEVICE_IP, DEVICE_ZWAVE] })
+    render(<PendingDevicesModal {...baseProps} />)
+    await waitFor(() => expect(screen.getByTestId('pending-card-dev-c')).toBeInTheDocument())
+    expect(screen.getByText('Z-WAVE')).toBeInTheDocument()
+  })
+
+  it('filters by source (zwave only)', async () => {
+    mockPending.mockResolvedValue({ data: [DEVICE_IP, DEVICE_ZWAVE] })
+    render(<PendingDevicesModal {...baseProps} />)
+    await waitFor(() => expect(screen.getByTestId('pending-card-dev-a')).toBeInTheDocument())
+    fireEvent.click(screen.getByRole('button', { name: 'Z-Wave' }))
+    expect(screen.queryByTestId('pending-card-dev-a')).not.toBeInTheDocument()
+    expect(screen.getByTestId('pending-card-dev-c')).toBeInTheDocument()
+  })
+
   it('filters by suggested type', async () => {
     render(<PendingDevicesModal {...baseProps} />)
     await waitFor(() => expect(screen.getByTestId('pending-card-dev-a')).toBeInTheDocument())
@@ -180,7 +213,7 @@ describe('PendingDevicesModal', () => {
     fireEvent.click(screen.getByTestId('pending-card-dev-a'))
     fireEvent.click(screen.getByTestId('pending-card-dev-b'))
     fireEvent.click(screen.getByRole('button', { name: /Approve \(2\)/ }))
-    await waitFor(() => expect(mockBulkApprove).toHaveBeenCalledWith(['dev-a', 'dev-b']))
+    await waitFor(() => expect(mockBulkApprove).toHaveBeenCalledWith(['dev-a', 'dev-b'], null))
   })
 
   it('bulk approve carries the scanned MAC onto the canvas node (#168)', async () => {
@@ -257,7 +290,7 @@ describe('PendingDevicesModal', () => {
     fireEvent.click(screen.getByRole('button', { name: 'Select mode' }))
     fireEvent.click(screen.getByTestId('pending-card-dev-a'))
     fireEvent.keyDown(window, { key: 'Enter' })
-    await waitFor(() => expect(mockBulkApprove).toHaveBeenCalledWith(['dev-a']))
+    await waitFor(() => expect(mockBulkApprove).toHaveBeenCalledWith(['dev-a'], null))
     expect(mockBulkRestore).not.toHaveBeenCalled()
   })
 
@@ -270,5 +303,65 @@ describe('PendingDevicesModal', () => {
     fireEvent.keyDown(window, { key: 'Enter' })
     await waitFor(() => expect(mockBulkRestore).toHaveBeenCalledWith(['dev-a']))
     expect(mockBulkApprove).not.toHaveBeenCalled()
+  })
+
+  // --- Device Inventory: rename, canvas badge, on-canvas filter ---
+
+  it('titles the pending view "Device Inventory"', async () => {
+    render(<PendingDevicesModal {...baseProps} />)
+    await waitFor(() => expect(screen.getByTestId('pending-card-dev-a')).toBeInTheDocument())
+    expect(screen.getByText('Device Inventory')).toBeInTheDocument()
+  })
+
+  it('shows "Hidden Devices" title in hidden mode', async () => {
+    mockHidden.mockResolvedValue({ data: [{ ...DEVICE_IP, status: 'hidden' }] })
+    render(<PendingDevicesModal {...baseProps} initialStatus="hidden" />)
+    await waitFor(() => expect(screen.getByTestId('pending-card-dev-a')).toBeInTheDocument())
+    expect(screen.getByText('Hidden Devices')).toBeInTheDocument()
+  })
+
+  it('renders a corner canvas-count when canvas_count > 0', async () => {
+    mockPending.mockResolvedValue({ data: [{ ...DEVICE_IP, canvas_count: 2 }] })
+    render(<PendingDevicesModal {...baseProps} />)
+    await waitFor(() => expect(screen.getByTestId('pending-card-dev-a')).toBeInTheDocument())
+    const corner = screen.getByLabelText('On 2 canvases')
+    expect(corner).toHaveTextContent('2')
+  })
+
+  it('uses singular "canvas" for a single canvas', async () => {
+    mockPending.mockResolvedValue({ data: [{ ...DEVICE_IP, canvas_count: 1 }] })
+    render(<PendingDevicesModal {...baseProps} />)
+    await waitFor(() => expect(screen.getByTestId('pending-card-dev-a')).toBeInTheDocument())
+    expect(screen.getByLabelText('On 1 canvas')).toHaveTextContent('1')
+  })
+
+  it('does not render the canvas-count corner when canvas_count is 0', async () => {
+    mockPending.mockResolvedValue({ data: [{ ...DEVICE_IP, canvas_count: 0 }] })
+    render(<PendingDevicesModal {...baseProps} />)
+    await waitFor(() => expect(screen.getByTestId('pending-card-dev-a')).toBeInTheDocument())
+    expect(screen.queryByLabelText(/On \d+ canvas/)).not.toBeInTheDocument()
+  })
+
+  it('filters to devices with detected services when "With services" is on', async () => {
+    // dev-a has an http service; dev-b (zigbee) has none.
+    render(<PendingDevicesModal {...baseProps} />)
+    await waitFor(() => expect(screen.getByTestId('pending-card-dev-b')).toBeInTheDocument())
+    fireEvent.click(screen.getByRole('button', { name: /With services/ }))
+    expect(screen.getByTestId('pending-card-dev-a')).toBeInTheDocument()
+    expect(screen.queryByTestId('pending-card-dev-b')).not.toBeInTheDocument()
+  })
+
+  it('shows on-canvas devices by default and hides them when toggled off', async () => {
+    mockPending.mockResolvedValue({
+      data: [DEVICE_IP, { ...DEVICE_ZIGBEE, canvas_count: 1 }],
+    })
+    render(<PendingDevicesModal {...baseProps} />)
+    // Default: both visible (on-canvas shown).
+    await waitFor(() => expect(screen.getByTestId('pending-card-dev-b')).toBeInTheDocument())
+    expect(screen.getByTestId('pending-card-dev-a')).toBeInTheDocument()
+    // Toggle off → the on-canvas device (dev-b) disappears.
+    fireEvent.click(screen.getByRole('button', { name: /Hide on-canvas/ }))
+    expect(screen.queryByTestId('pending-card-dev-b')).not.toBeInTheDocument()
+    expect(screen.getByTestId('pending-card-dev-a')).toBeInTheDocument()
   })
 })

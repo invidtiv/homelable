@@ -22,6 +22,7 @@ import { EdgeModal } from '@/components/modals/EdgeModal'
 import { ScanConfigModal } from '@/components/modals/ScanConfigModal'
 import { SettingsModal } from '@/components/modals/SettingsModal'
 import { ZigbeeImportModal } from '@/components/zigbee/ZigbeeImportModal'
+import { ZwaveImportModal } from '@/components/zwave/ZwaveImportModal'
 import { GroupRectModal, type GroupRectFormData } from '@/components/modals/GroupRectModal'
 import { TextModal, type TextFormData } from '@/components/modals/TextModal'
 import { ThemeModal } from '@/components/modals/ThemeModal'
@@ -39,6 +40,7 @@ import { demoNodes, demoEdges } from '@/utils/demoData'
 import { useStatusPolling } from '@/hooks/useStatusPolling'
 import type { NodeData, EdgeData, CustomStyleDef } from '@/types'
 import type { ZigbeeNode, ZigbeeEdge } from '@/components/zigbee/types'
+import type { ZwaveNode, ZwaveEdge } from '@/components/zwave/types'
 
 const STANDALONE = import.meta.env.VITE_STANDALONE === 'true'
 const STANDALONE_STORAGE_KEY = 'homelable_canvas'
@@ -77,6 +79,7 @@ export default function App() {
   const [settingsOpen, setSettingsOpen] = useState(false)
   const [exportModalOpen, setExportModalOpen] = useState(false)
   const [zigbeeImportOpen, setZigbeeImportOpen] = useState(false)
+  const [zwaveImportOpen, setZwaveImportOpen] = useState(false)
 
   // Declare handleSave before the Ctrl+S effect so it is in scope.
   // Returns true on success, false on failure — the design-switch effect relies
@@ -560,6 +563,50 @@ export default function App() {
     markUnsaved()
   }, [addNode, onConnect, snapshotHistory, markUnsaved])
 
+  const handleZwaveAddToCanvas = useCallback((zwaveNodes: ZwaveNode[], zwaveEdges: ZwaveEdge[]) => {
+    snapshotHistory()
+    const COLS = 4
+    const SPACING_X = 170
+    const SPACING_Y = 100
+    zwaveNodes.forEach((zn, i) => {
+      const id = zn.id
+      const col = i % COLS
+      const row = Math.floor(i / COLS)
+      const position = { x: 500 + col * SPACING_X, y: 100 + row * SPACING_Y }
+      const newNode: import('@xyflow/react').Node<NodeData> = {
+        id,
+        type: zn.type,
+        position,
+        data: {
+          label: zn.friendly_name,
+          type: zn.type as NodeData['type'],
+          status: 'unknown' as const,
+          services: [],
+          ...(zn.model ? { os: zn.model } : {}),
+          ...(zn.parent_id ? { parent_id: zn.parent_id } : {}),
+        },
+      }
+      addNode(newNode)
+    })
+    // Add IoT edges between Z-Wave devices: parent bottom -> child top
+    zwaveEdges.forEach((ze) => {
+      onConnect({
+        source: ze.source,
+        sourceHandle: 'bottom',
+        target: ze.target,
+        targetHandle: 'top-t',
+        type: 'iot',
+      } as unknown as import('@xyflow/react').Connection)
+    })
+    const importedIds = new Set(zwaveNodes.map((zn) => zn.id))
+    useCanvasStore.setState((state) => ({
+      nodes: state.nodes.map((n) => ({ ...n, selected: importedIds.has(n.id) })),
+      selectedNodeIds: Array.from(importedIds),
+      selectedNodeId: importedIds.size === 1 ? Array.from(importedIds)[0] : null,
+    }))
+    markUnsaved()
+  }, [addNode, onConnect, snapshotHistory, markUnsaved])
+
   const handleEdgeConnect = useCallback((connection: Connection) => {
     setPendingConnection(connection)
   }, [])
@@ -634,6 +681,7 @@ export default function App() {
             onAddText={() => setAddTextOpen(true)}
             onScan={() => setScanConfigOpen(true)}
             onZigbeeImport={() => setZigbeeImportOpen(true)}
+            onZwaveImport={() => setZwaveImportOpen(true)}
             onSave={handleSave}
             onOpenSettings={() => setSettingsOpen(true)}
             onOpenHistory={() => setScanHistoryOpen(true)}
@@ -748,6 +796,17 @@ export default function App() {
             onAddToCanvas={handleZigbeeAddToCanvas}
             onPendingImported={() => {
               toast.success('Zigbee import started — check Scan History for results')
+            }}
+          />
+        )}
+
+        {!STANDALONE && (
+          <ZwaveImportModal
+            open={zwaveImportOpen}
+            onClose={() => setZwaveImportOpen(false)}
+            onAddToCanvas={handleZwaveAddToCanvas}
+            onPendingImported={() => {
+              toast.success('Z-Wave import started — check Scan History for results')
             }}
           />
         )}

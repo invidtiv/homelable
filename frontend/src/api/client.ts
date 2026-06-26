@@ -58,8 +58,16 @@ export const liveviewApi = {
   getConfig: () => api.get<{ enabled: boolean; key: string | null }>('/liveview/config'),
 }
 
+export interface DeepScanConfig {
+  http_ranges: string[]
+  http_probe_enabled: boolean
+  verify_tls: boolean
+}
+
+export type ScanConfigData = { ranges: string[] } & DeepScanConfig
+
 export const scanApi = {
-  trigger: () => api.post('/scan/trigger'),
+  trigger: (deepScan?: Partial<DeepScanConfig>) => api.post('/scan/trigger', deepScan ?? {}),
   pending: () => api.get('/scan/pending'),
   hidden: () => api.get('/scan/hidden'),
   runs: () => api.get('/scan/runs'),
@@ -73,7 +81,7 @@ export const scanApi = {
     }>(`/scan/pending/${id}/approve`, nodeData),
   hide: (id: string) => api.post(`/scan/pending/${id}/hide`),
   ignore: (id: string) => api.post(`/scan/pending/${id}/ignore`),
-  bulkApprove: (ids: string[]) =>
+  bulkApprove: (ids: string[], designId?: string | null) =>
     api.post<{
       approved: number
       node_ids: string[]
@@ -81,13 +89,13 @@ export const scanApi = {
       edges_created: number
       edges: { id: string; source: string; target: string }[]
       skipped: number
-    }>('/scan/pending/bulk-approve', { device_ids: ids }),
+    }>('/scan/pending/bulk-approve', { device_ids: ids, design_id: designId ?? undefined }),
   bulkHide: (ids: string[]) => api.post<{ hidden: number; skipped: number }>('/scan/pending/bulk-hide', { device_ids: ids }),
   restore: (id: string) => api.post<{ restored: boolean; device_id: string }>(`/scan/pending/${id}/restore`),
   bulkRestore: (ids: string[]) => api.post<{ restored: number; skipped: number }>('/scan/pending/bulk-restore', { device_ids: ids }),
   stop: (runId: string) => api.post(`/scan/${runId}/stop`),
-  getConfig: () => api.get<{ ranges: string[] }>('/scan/config'),
-  saveConfig: (data: { ranges: string[] }) => api.post('/scan/config', data),
+  getConfig: () => api.get<ScanConfigData>('/scan/config'),
+  saveConfig: (data: ScanConfigData) => api.post('/scan/config', data),
 }
 
 export interface AppSettings {
@@ -155,4 +163,53 @@ export const zigbeeApi = {
       finished_at: string | null
       error: string | null
     }>('/zigbee/import-pending', data),
+}
+
+export const zwaveApi = {
+  testConnection: (data: {
+    mqtt_host: string
+    mqtt_port: number
+    mqtt_username?: string
+    mqtt_password?: string
+    mqtt_tls?: boolean
+    mqtt_tls_insecure?: boolean
+  }) =>
+    api.post<{ connected: boolean; message: string }>('/zwave/test-connection', data),
+
+  importNetwork: (data: {
+    mqtt_host: string
+    mqtt_port: number
+    mqtt_username?: string
+    mqtt_password?: string
+    prefix?: string
+    gateway_name?: string
+    mqtt_tls?: boolean
+    mqtt_tls_insecure?: boolean
+  }) =>
+    api.post<{
+      nodes: import('@/components/zwave/types').ZwaveNode[]
+      edges: import('@/components/zwave/types').ZwaveEdge[]
+      device_count: number
+    }>('/zwave/import', data),
+
+  importToPending: (data: {
+    mqtt_host: string
+    mqtt_port: number
+    mqtt_username?: string
+    mqtt_password?: string
+    prefix?: string
+    gateway_name?: string
+    mqtt_tls?: boolean
+    mqtt_tls_insecure?: boolean
+  }) =>
+    api.post<{
+      id: string
+      status: string
+      kind: string
+      ranges: string[]
+      devices_found: number
+      started_at: string
+      finished_at: string | null
+      error: string | null
+    }>('/zwave/import-pending', data),
 }

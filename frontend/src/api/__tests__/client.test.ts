@@ -170,7 +170,7 @@ describe('api/client', () => {
 
   it('scanApi endpoints route correctly', () => {
     mod.scanApi.trigger()
-    expect(api.post).toHaveBeenCalledWith('/scan/trigger')
+    expect(api.post).toHaveBeenCalledWith('/scan/trigger', {})
     mod.scanApi.pending()
     expect(api.get).toHaveBeenCalledWith('/scan/pending')
     mod.scanApi.hidden()
@@ -186,7 +186,9 @@ describe('api/client', () => {
     mod.scanApi.ignore('d1')
     expect(api.post).toHaveBeenCalledWith('/scan/pending/d1/ignore')
     mod.scanApi.bulkApprove(['a', 'b'])
-    expect(api.post).toHaveBeenCalledWith('/scan/pending/bulk-approve', { device_ids: ['a', 'b'] })
+    expect(api.post).toHaveBeenCalledWith('/scan/pending/bulk-approve', { device_ids: ['a', 'b'], design_id: undefined })
+    mod.scanApi.bulkApprove(['a'], 'design-9')
+    expect(api.post).toHaveBeenCalledWith('/scan/pending/bulk-approve', { device_ids: ['a'], design_id: 'design-9' })
     mod.scanApi.bulkHide(['a'])
     expect(api.post).toHaveBeenCalledWith('/scan/pending/bulk-hide', { device_ids: ['a'] })
     mod.scanApi.restore('d1')
@@ -216,5 +218,15 @@ describe('api/client', () => {
     expect(api.post).toHaveBeenCalledWith('/zigbee/import', cfg)
     mod.zigbeeApi.importToPending(cfg)
     expect(api.post).toHaveBeenCalledWith('/zigbee/import-pending', cfg)
+  })
+
+  it('zwaveApi.testConnection/importNetwork/importToPending', () => {
+    const cfg = { mqtt_host: 'h', mqtt_port: 1883, prefix: 'zwave', gateway_name: 'zwavejs2mqtt' }
+    mod.zwaveApi.testConnection(cfg)
+    expect(api.post).toHaveBeenCalledWith('/zwave/test-connection', cfg)
+    mod.zwaveApi.importNetwork(cfg)
+    expect(api.post).toHaveBeenCalledWith('/zwave/import', cfg)
+    mod.zwaveApi.importToPending(cfg)
+    expect(api.post).toHaveBeenCalledWith('/zwave/import-pending', cfg)
   })
 })

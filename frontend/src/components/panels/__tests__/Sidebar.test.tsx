@@ -70,6 +70,7 @@ const defaultProps = {
   onAddText: vi.fn(),
   onScan: vi.fn(),
   onZigbeeImport: vi.fn(),
+  onZwaveImport: vi.fn(),
   onSave: vi.fn(),
   onOpenSettings: vi.fn(),
   onOpenHistory: vi.fn(),
@@ -98,7 +99,7 @@ describe('Sidebar', () => {
   it('shows all view nav items', () => {
     render(<Sidebar {...defaultProps} />)
     expect(screen.getByText('Canvas')).toBeInTheDocument()
-    expect(screen.getByText('Pending Devices')).toBeInTheDocument()
+    expect(screen.getByText('Device Inventory')).toBeInTheDocument()
     expect(screen.getByText('Hidden Devices')).toBeInTheDocument()
     expect(screen.getByText('Scan History')).toBeInTheDocument()
   })
@@ -184,6 +185,12 @@ describe('Sidebar', () => {
     expect(defaultProps.onAddGroupRect).toHaveBeenCalledOnce()
   })
 
+  it('calls onZwaveImport when Z-Wave Import is clicked', () => {
+    render(<Sidebar {...defaultProps} />)
+    fireEvent.click(screen.getByText('Z-Wave Import'))
+    expect(defaultProps.onZwaveImport).toHaveBeenCalledOnce()
+  })
+
   it('calls onSave when Save Canvas is clicked', () => {
     render(<Sidebar {...defaultProps} />)
     fireEvent.click(screen.getByText('Save Canvas'))
@@ -233,9 +240,9 @@ describe('Sidebar', () => {
 
   // ── Pending / Hidden open modal ────────────────────────────────────────────
 
-  it('calls onOpenPending with pending status when Pending Devices is clicked', () => {
+  it('calls onOpenPending with pending status when Device Inventory is clicked', () => {
     render(<Sidebar {...defaultProps} />)
-    fireEvent.click(screen.getByText('Pending Devices'))
+    fireEvent.click(screen.getByText('Device Inventory'))
     expect(defaultProps.onOpenPending).toHaveBeenCalledWith(undefined, 'pending')
   })
 
