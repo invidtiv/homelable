@@ -40,6 +40,20 @@ The scanner runs `nmap -sV --open` on your configured CIDR ranges and populates 
 To save you time when mapping your infrastructure, Homlable can scan your network and report all the services it detects. It can also identify them, saving you even more time.
 Click **Scan Network** in the sidebar. The Scan History tab opens automatically and refreshes every 3 seconds until the scan completes.
 
+### Deep scan (custom ports)
+
+By default the scanner only probes nmap's standard port set. To fingerprint services on non-standard ports, enable the deep scan via `.env` (all options are overridable per-scan from the scan dialog):
+
+```env
+# JSON array of port specs — each entry is a single port "N" or an inclusive
+# range "N-M" (1–65535, N <= M). These are ports, not CIDRs or bare integers.
+SCANNER_HTTP_RANGES=["8080","9000-9100"]
+SCANNER_HTTP_PROBE_ENABLED=true   # send an HTTP probe to those ports for service ID
+SCANNER_HTTP_VERIFY_TLS=false     # verify TLS certs on the HTTP probe
+```
+
+The listed ports are appended to nmap's `-p` spec. Invalid entries (out-of-range, malformed, or reversed ranges) are silently skipped.
+
 ### macOS / root privileges
 
 Some nmap scan types (SYN scan, OS detection) require root. If the scan fails with a permissions error, run it manually with sudo using the included script:
