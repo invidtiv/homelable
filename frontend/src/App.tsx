@@ -4,6 +4,7 @@ import { type Node } from '@xyflow/react'
 import { applyDagreLayout } from '@/utils/layout'
 import { serializeNode, serializeEdge, deserializeApiNode, deserializeApiEdge, type ApiNode, type ApiEdge } from '@/utils/canvasSerializer'
 import { generateUUID } from '@/utils/uuid'
+import { getCenteredPosition } from '@/utils/viewportCenter'
 import { resolveVirtualEdgeParent } from '@/utils/virtualEdgeParent'
 import { generateMarkdownTable } from '@/utils/exportMarkdown'
 import { copyToClipboard } from '@/utils/clipboard'
@@ -259,7 +260,7 @@ export default function App() {
     // extent, so we don't set them here.
     const position = nestInParent && parentNode
       ? { x: parentNode.position.x + 20, y: parentNode.position.y + 50 }
-      : { x: 300, y: 300 }
+      : getCenteredPosition(isContainerNode ? 300 : 0, isContainerNode ? 200 : 0)
 
     const newNode: Node<NodeData> = {
       id,
@@ -278,7 +279,7 @@ export default function App() {
     const newNode: Node<NodeData> = {
       id,
       type: 'groupRect',
-      position: { x: 200, y: 200 },
+      position: getCenteredPosition(360, 240),
       data: {
         label: data.label,
         type: 'groupRect',
@@ -337,7 +338,7 @@ export default function App() {
       // node fields; text_content is not in the schema and was lost on reload.
       // TextNode and the edit modal both already fall back to label.
       type: 'text',
-      position: { x: 250, y: 250 },
+      position: getCenteredPosition(200, 60),
       data: {
         label: data.text,
         type: 'text',
@@ -502,15 +503,18 @@ export default function App() {
 
   const handleZigbeeAddToCanvas = useCallback((zigbeeNodes: ZigbeeNode[], zigbeeEdges: ZigbeeEdge[]) => {
     snapshotHistory()
-    // Place nodes in a grid starting at x=500, y=100
+    // Place nodes in a grid centred on the visible canvas.
     const COLS = 4
     const SPACING_X = 170
     const SPACING_Y = 100
+    const cols = Math.min(COLS, zigbeeNodes.length)
+    const rows = Math.ceil(zigbeeNodes.length / COLS)
+    const origin = getCenteredPosition(cols * SPACING_X, rows * SPACING_Y)
     zigbeeNodes.forEach((zn, i) => {
       const id = zn.id
       const col = i % COLS
       const row = Math.floor(i / COLS)
-      const position = { x: 500 + col * SPACING_X, y: 100 + row * SPACING_Y }
+      const position = { x: origin.x + col * SPACING_X, y: origin.y + row * SPACING_Y }
       const newNode: import('@xyflow/react').Node<NodeData> = {
         id,
         type: zn.type,
@@ -553,11 +557,14 @@ export default function App() {
     const COLS = 4
     const SPACING_X = 170
     const SPACING_Y = 100
+    const cols = Math.min(COLS, zwaveNodes.length)
+    const rows = Math.ceil(zwaveNodes.length / COLS)
+    const origin = getCenteredPosition(cols * SPACING_X, rows * SPACING_Y)
     zwaveNodes.forEach((zn, i) => {
       const id = zn.id
       const col = i % COLS
       const row = Math.floor(i / COLS)
-      const position = { x: 500 + col * SPACING_X, y: 100 + row * SPACING_Y }
+      const position = { x: origin.x + col * SPACING_X, y: origin.y + row * SPACING_Y }
       const newNode: import('@xyflow/react').Node<NodeData> = {
         id,
         type: zn.type,

@@ -23,6 +23,7 @@ import { edgeTypes } from './edges/edgeTypes'
 import { SearchBar } from './SearchBar'
 import { AlignmentGuides } from './AlignmentGuides'
 import { useAlignmentGuides } from '@/hooks/useAlignmentGuides'
+import { setViewportCenterProjector } from '@/utils/viewportCenter'
 import type { NodeData, EdgeData } from '@/types'
 
 interface CanvasContainerProps {
@@ -51,6 +52,20 @@ export function CanvasContainer({ onConnect: onConnectProp, onEdgeDoubleClick, o
   const onMouseMove = useCallback((e: React.MouseEvent) => {
     cursorRef.current = { x: e.clientX, y: e.clientY }
   }, [])
+
+  // Expose the visible-canvas centre (in flow coords) to add-node handlers that
+  // live outside ReactFlowProvider, so new nodes land where the user is looking.
+  const wrapperRef = useRef<HTMLDivElement>(null)
+  useEffect(() => {
+    setViewportCenterProjector(() => {
+      const rect = wrapperRef.current?.getBoundingClientRect()
+      const screen = rect
+        ? { x: rect.left + rect.width / 2, y: rect.top + rect.height / 2 }
+        : { x: window.innerWidth / 2, y: window.innerHeight / 2 }
+      return screenToFlowPosition(screen)
+    })
+    return () => setViewportCenterProjector(null)
+  }, [screenToFlowPosition])
 
   // Copy / paste shortcuts. Registered here (inside ReactFlowProvider) so paste
   // can project the cursor / viewport center into flow coordinates.
@@ -146,7 +161,7 @@ export function CanvasContainer({ onConnect: onConnectProp, onEdgeDoubleClick, o
   }, [onRequestAddToGroup, onRequestAddToContainer, getIntersectingNodes, onNodeDragStop])
 
   return (
-    <div className="w-full h-full" style={{ background: theme.colors.canvasBackground }} onMouseMove={onMouseMove}>
+    <div ref={wrapperRef} className="w-full h-full" style={{ background: theme.colors.canvasBackground }} onMouseMove={onMouseMove}>
       <ReactFlow
         nodes={visibleNodes}
         edges={visibleEdges}
