@@ -278,6 +278,74 @@ async def test_nmap_scan_raises_on_sweep_error():
 
 
 # ---------------------------------------------------------------------------
+# Cancellation responsiveness (issue #218)
+# ---------------------------------------------------------------------------
+
+@pytest.mark.asyncio
+async def test_nmap_scan_cancelled_before_start_skips_phases():
+    """A run already cancelled returns immediately without touching the network."""
+    from app.services.scanner import _cancelled_runs, _nmap_scan, request_cancel
+
+    run_id = "cancel-before-start"
+    request_cancel(run_id)
+    try:
+        with patch("app.services.scanner._ping_sweep", new_callable=AsyncMock) as mock_sweep, \
+             patch("app.services.scanner._nmap_port_scan", new_callable=AsyncMock) as mock_port:
+            result = await _nmap_scan("192.168.1.0/24", run_id=run_id)
+        assert result == []
+        mock_sweep.assert_not_called()
+        mock_port.assert_not_called()
+    finally:
+        _cancelled_runs.discard(run_id)
+
+
+@pytest.mark.asyncio
+async def test_ping_sweep_cancelled_mid_sweep_returns_empty():
+    """Cancelling during Phase 1 bails before Phase 2 — no alive hosts returned."""
+    from app.services.scanner import _cancelled_runs, _ping_sweep, request_cancel
+
+    run_id = "cancel-during-sweep"
+
+    async def _fake_subprocess(*args, **kwargs):
+        proc = AsyncMock()
+        proc.wait = AsyncMock(return_value=1)
+        proc.returncode = 1
+        return proc
+
+    request_cancel(run_id)
+    try:
+        with patch("app.services.scanner.asyncio.create_subprocess_exec", new=_fake_subprocess), \
+             patch("app.services.scanner._arp_table_hosts", return_value={}):
+            result = await _ping_sweep("192.168.1.0/30", run_id=run_id)
+        assert result == {}
+    finally:
+        _cancelled_runs.discard(run_id)
+
+
+@pytest.mark.asyncio
+async def test_nmap_port_scan_skips_queued_hosts_when_cancelled():
+    """Once cancelled, queued hosts return unscanned instead of invoking nmap."""
+    from app.services.scanner import _cancelled_runs, _nmap_port_scan, request_cancel
+
+    run_id = "cancel-port-scan"
+    alive = {
+        "192.168.1.10": {
+            "ip": "192.168.1.10", "mac": None, "hostname": None,
+            "os": None, "open_ports": [],
+        },
+    }
+    request_cancel(run_id)
+    try:
+        with patch("app.services.scanner._nmap_scan_single") as mock_single:
+            result = await _nmap_port_scan(alive, run_id=run_id)
+        mock_single.assert_not_called()
+        assert result[0]["ip"] == "192.168.1.10"
+        assert result[0]["open_ports"] == []
+    finally:
+        _cancelled_runs.discard(run_id)
+
+
+# ---------------------------------------------------------------------------
 # _mdns_discover
 # ---------------------------------------------------------------------------
 
@@ -665,7 +733,7 @@ async def test_run_scan_deep_scan_passes_port_spec_to_nmap(mem_db):
 
     captured = {}
 
-    async def fake_nmap(target, port_spec):
+    async def fake_nmap(target, port_spec, run_id=None):
         captured["port_spec"] = port_spec
         return []
 

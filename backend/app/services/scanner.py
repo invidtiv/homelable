@@ -175,7 +175,7 @@ def _arp_table_hosts(network: str) -> dict[str, dict[str, Any]]:
         return {}
 
 
-async def _ping_sweep(target: str) -> dict[str, dict[str, Any]]:
+async def _ping_sweep(target: str, run_id: str | None = None) -> dict[str, dict[str, Any]]:
     """
     Phase 1: Concurrent ICMP ping sweep + ARP cache.
     Pings all IPs in the CIDR in parallel (up to 50 at once, 1s timeout each).
@@ -204,6 +204,12 @@ async def _ping_sweep(target: str) -> dict[str, dict[str, Any]]:
     ping_results = await asyncio.gather(*[_ping(ip) for ip in all_ips])
     alive_ips: set[str] = {ip for ip in ping_results if ip is not None}
     logger.info("[Phase 1] %d/%d hosts responded to ping", len(alive_ips), len(all_ips))
+
+    # Cancelled during the sweep — bail before the (potentially long) Phase 2
+    # port scan. Returning empty makes _nmap_scan skip nmap entirely.
+    if run_id is not None and _is_cancelled(run_id):
+        logger.info("[Phase 1] %s — scan cancelled, skipping hostname/ARP enrichment", target)
+        return {}
 
     # ARP cache: catch devices that block ICMP but were recently active,
     # and enrich ping-alive hosts with their MAC addresses.
@@ -286,7 +292,8 @@ def _nmap_scan_single(host_dict: dict[str, Any], port_spec: str = _EXTRA_PORTS) 
 
 
 async def _nmap_port_scan(
-    alive: dict[str, dict[str, Any]], port_spec: str = _EXTRA_PORTS
+    alive: dict[str, dict[str, Any]], port_spec: str = _EXTRA_PORTS,
+    run_id: str | None = None,
 ) -> list[dict[str, Any]]:
     """
     Phase 2: Per-IP service detection with bounded concurrency.
@@ -301,6 +308,11 @@ async def _nmap_port_scan(
 
     async def _scan_with_sem(host_dict: dict[str, Any]) -> dict[str, Any]:
         async with semaphore:
+            # Once cancelled, skip the expensive nmap call for every host still
+            # queued behind the semaphore — return it unscanned so the gather
+            # unwinds fast instead of blocking the stop for minutes.
+            if run_id is not None and _is_cancelled(run_id):
+                return host_dict
             return await asyncio.to_thread(_nmap_scan_single, host_dict, port_spec)
 
     raw = await asyncio.gather(*[_scan_with_sem(h) for h in alive.values()], return_exceptions=True)
@@ -314,24 +326,32 @@ async def _nmap_port_scan(
     return results
 
 
-async def _nmap_scan(target: str, port_spec: str = _EXTRA_PORTS) -> list[dict[str, Any]]:
+async def _nmap_scan(
+    target: str, port_spec: str = _EXTRA_PORTS, run_id: str | None = None
+) -> list[dict[str, Any]]:
     """
     Two-phase scan for a CIDR range.
     Phase 1: Concurrent ping sweep to find alive hosts (fast, no false positives).
     Phase 2: Per-IP nmap port scan with service detection (bounded concurrency, 10 at a time).
+
+    ``run_id`` lets each phase poll for cancellation so a stop request takes
+    effect mid-range instead of only at CIDR/host boundaries in run_scan.
     """
     logger.info("[Scan] Starting scan for %s — nmap available: %s", target, _NMAP_AVAILABLE)
+    if run_id is not None and _is_cancelled(run_id):
+        logger.info("[Scan] %s — cancelled before start, skipping", target)
+        return []
     if not _NMAP_AVAILABLE:
         logger.warning("[Scan] nmap not available — returning mock data")
         return _mock_scan(target)
     try:
-        alive = await _ping_sweep(target)
+        alive = await _ping_sweep(target, run_id=run_id)
         logger.info("[Phase 1] Found %d alive host(s) in %s: %s",
                     len(alive), target, ", ".join(sorted(alive.keys())))
     except Exception as exc:
         logger.error("Phase 1 ping sweep failed: %s", exc)
         raise RuntimeError(str(exc)) from exc
-    return await _nmap_port_scan(alive, port_spec)
+    return await _nmap_port_scan(alive, port_spec, run_id=run_id)
 
 
 async def _mdns_discover(timeout: float = 4.0) -> list[dict[str, Any]]:
@@ -563,7 +583,7 @@ async def run_scan(
         for cidr in ranges:
             if _is_cancelled(run_id):
                 break
-            hosts = await _nmap_scan(cidr, port_spec)
+            hosts = await _nmap_scan(cidr, port_spec, run_id=run_id)
             for host in hosts:
                 if _is_cancelled(run_id):
                     break

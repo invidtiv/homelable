@@ -652,6 +652,10 @@ async def test_stop_scan_success(client: AsyncClient, headers, db_session: Async
     assert res.json() == {"stopping": True}
     # run_id added to cancel set
     assert run.id in _cancelled_runs
+    # status flipped eagerly so the UI reacts without waiting for a checkpoint
+    await db_session.refresh(run)
+    assert run.status == "cancelled"
+    assert run.finished_at is not None
     # cleanup for other tests
     _cancelled_runs.discard(run.id)
 
@@ -691,7 +695,7 @@ async def test_run_scan_cancelled_mid_scan_skips_remaining_cidrs(db_session: Asy
 
     call_count = 0
 
-    def nmap_side_effect(target: str, port_spec: str | None = None):
+    def nmap_side_effect(target: str, port_spec: str | None = None, run_id: str | None = None):
         nonlocal call_count
         call_count += 1
         # Signal cancellation after the first CIDR scan completes

@@ -1,7 +1,7 @@
 import ipaddress
 import logging
 import uuid
-from datetime import datetime
+from datetime import datetime, timezone
 from typing import Any
 
 from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException
@@ -191,6 +191,12 @@ async def stop_scan(
     if run.status != "running":
         raise HTTPException(status_code=409, detail="Scan is not running")
     request_cancel(run_id)
+    # Flip status eagerly so the UI reflects the stop immediately, instead of
+    # waiting for run_scan to reach its next cancellation checkpoint (which may
+    # be blocked inside a long nmap call). run_scan converges to the same state.
+    run.status = "cancelled"
+    run.finished_at = datetime.now(timezone.utc)
+    await db.commit()
     return {"stopping": True}
 
 
