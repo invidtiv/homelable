@@ -12,6 +12,7 @@
  */
 import type { Node, Edge } from '@xyflow/react'
 import type { Design, DesignType, NodeData, EdgeData, CustomStyleDef } from '@/types'
+import type { ThemeId } from '@/utils/themes'
 import { generateUUID } from '@/utils/uuid'
 
 const DESIGNS_KEY = 'homelable_designs'
@@ -21,7 +22,7 @@ const canvasKey = (designId: string) => `${LEGACY_CANVAS_KEY}:${designId}`
 export interface StandaloneCanvas {
   nodes: Node<NodeData>[]
   edges: Edge<EdgeData>[]
-  theme_id?: string
+  theme_id?: ThemeId
   custom_style?: CustomStyleDef | null
 }
 
