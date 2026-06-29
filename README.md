@@ -123,6 +123,37 @@ LQI (Link Quality Indicator) is stored as a node property.
 
 ---
 
+## Z-Wave Import
+
+Homelable can also import your **Z-Wave** network from **Z-Wave JS UI** (formerly `zwavejs2mqtt`) over the same MQTT broker, dropping each node on the canvas as a typed node.
+
+### Prerequisites
+
+- A running **MQTT broker** (e.g. Mosquitto) accessible from the Homelable host
+- **Z-Wave JS UI** connected to the broker with its MQTT gateway enabled and at least one node included
+
+### Usage
+
+1. Click **Z-Wave Import** in the left sidebar (below "Zigbee Import")
+2. Enter your broker host, port (default `1883`), optional credentials, MQTT prefix (default `zwave`), and gateway name (default `zwavejs2mqtt`)
+3. Click **Test Connection** to verify reachability
+4. Choose a target — **Pending section** or **Canvas directly** — then **Import to Pending** / **Fetch Devices**
+5. Select the devices you want from the grouped list (Controller / Router / End Device) and click **Add N to Canvas**
+
+### Node Types
+
+| Type | Z-Wave Role | Icon |
+|------|-------------|------|
+| `zwave_coordinator` | Controller | Network hub |
+| `zwave_router` | Routing (mains-powered) node | Radio |
+| `zwave_enddevice` | End Device (battery) | Antenna |
+
+Hierarchy is set automatically: controller → routers → end devices (`parent_id`), derived from each node's neighbor list. Z-Wave has no LQI, so that property is omitted.
+
+> **Full documentation:** [docs/zwave-import.md](./docs/zwave-import.md)
+
+---
+
 ## Live View (read-only public canvas)
 
 Live View lets you share a read-only snapshot of your canvas with anyone on your network — no login required. It is disabled by default.
