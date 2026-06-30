@@ -18,6 +18,7 @@ const NODE_TYPE_GROUPS: { label: string; types: NodeType[] }[] = [
   { label: 'Virtualization', types: ['proxmox', 'vm', 'lxc', 'docker_host', 'docker_container'] },
   { label: 'IoT',            types: ['iot', 'camera', 'cpl'] },
   { label: 'Zigbee',         types: ['zigbee_coordinator', 'zigbee_router', 'zigbee_enddevice'] },
+  { label: 'Z-Wave',         types: ['zwave_coordinator', 'zwave_router', 'zwave_enddevice'] },
   { label: 'Personal',       types: ['computer', 'laptop', 'mobile'] },
   { label: 'Electrical',     types: ['grid', 'ups', 'battery', 'generator', 'solar_panel', 'inverter', 'circuit_breaker', 'contactor', 'electrical_switch', 'socket', 'light', 'meter', 'transformer', 'load'] },
   { label: 'Generic',        types: ['generic', 'groupRect'] },
@@ -26,6 +27,9 @@ const NODE_TYPE_GROUPS: { label: string; types: NodeType[] }[] = [
 const CHECK_METHODS: CheckMethod[] = ['none', 'ping', 'http', 'https', 'tcp', 'ssh', 'prometheus', 'health']
 const CONTAINER_MODE_TYPES: NodeType[] = ['proxmox', 'vm', 'lxc', 'docker_host']
 const ZIGBEE_TYPES: NodeType[] = ['zigbee_coordinator', 'zigbee_router', 'zigbee_enddevice']
+const ZWAVE_TYPES: NodeType[] = ['zwave_coordinator', 'zwave_router', 'zwave_enddevice']
+// Mesh radio devices aren't IP-reachable, so they default to no status check.
+const MESH_TYPES: NodeType[] = [...ZIGBEE_TYPES, ...ZWAVE_TYPES]
 
 const CHECK_METHOD_LABELS: Record<CheckMethod, string> = {
   none: 'None',
@@ -73,7 +77,7 @@ interface NodeModalProps {
 // initial value is enough - no need for a reset effect.
 export function NodeModal({ open, onClose, onSubmit, initial, title = 'Add Node', parentCandidates = [], currentNodeId }: NodeModalProps) {
   const merged = { ...DEFAULT_DATA, ...initial }
-  if (ZIGBEE_TYPES.includes((merged.type ?? '') as NodeType)) merged.check_method = 'none'
+  if (MESH_TYPES.includes((merged.type ?? '') as NodeType)) merged.check_method = 'none'
   const [form, setForm] = useState<Partial<NodeData>>(merged)
   const [iconSearch, setIconSearch] = useState('')
   const [iconPickerOpen, setIconPickerOpen] = useState(false)
@@ -133,7 +137,7 @@ export function NodeModal({ open, onClose, onSubmit, initial, title = 'Add Node'
                 const t = v as NodeType
                 setForm((f) => {
                   const next: Partial<NodeData> = { ...f, type: t }
-                  if (ZIGBEE_TYPES.includes(t)) next.check_method = 'none' as CheckMethod
+                  if (MESH_TYPES.includes(t)) next.check_method = 'none' as CheckMethod
                   // Drop the parent only if it's no longer a valid target for the
                   // new type — keep container-mode parents (any node can nest).
                   const parent = parentCandidates.find((n) => n.id === f.parent_id)

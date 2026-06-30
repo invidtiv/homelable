@@ -188,6 +188,20 @@ describe('NodeModal', () => {
     expect((onSubmit.mock.calls[0][0] as Partial<NodeData>).type).toBe('nas')
   })
 
+  it('offers Z-Wave node types and submits one', () => {
+    const { onSubmit } = renderModal({ initial: BASE })
+    fireEvent.change(selects()[0], { target: { value: 'zwave_enddevice' } })
+    fireEvent.click(screen.getByRole('button', { name: 'Add' }))
+    expect((onSubmit.mock.calls[0][0] as Partial<NodeData>).type).toBe('zwave_enddevice')
+  })
+
+  it('forces check_method to none when a Z-Wave type is selected', () => {
+    const { onSubmit } = renderModal({ initial: { ...BASE, check_method: 'ping' } })
+    fireEvent.change(selects()[0], { target: { value: 'zwave_coordinator' } })
+    fireEvent.click(screen.getByRole('button', { name: 'Add' }))
+    expect((onSubmit.mock.calls[0][0] as Partial<NodeData>).check_method).toBe('none')
+  })
+
   // ── Check method ──────────────────────────────────────────────────────
 
   it('pre-fills check_method from initial', () => {
