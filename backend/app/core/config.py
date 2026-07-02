@@ -24,6 +24,10 @@ class Settings(BaseSettings):
 
     secret_key: str  # Required — set SECRET_KEY in .env
     sqlite_path: str = "./data/homelab.db"
+    # Uploaded media (floor plans, and future raw image uploads) live on disk,
+    # not in the DB. Defaults to a `uploads/` folder next to the SQLite DB so it
+    # sits on the same persistent Docker volume. Override with UPLOAD_DIR.
+    upload_dir: str = ""
     cors_origins: list[str] = ["http://localhost:5173", "http://localhost:3000"]
 
     # JWT
@@ -78,6 +82,13 @@ class Settings(BaseSettings):
 
     def _override_path(self) -> Path:
         return Path(self.sqlite_path).parent / "scan_config.json"
+
+    def media_dir(self) -> Path:
+        """On-disk folder for uploaded media. Sits on the same persistent
+        volume as the SQLite DB unless UPLOAD_DIR is set."""
+        if self.upload_dir:
+            return Path(self.upload_dir)
+        return Path(self.sqlite_path).parent / "uploads"
 
     def load_overrides(self) -> None:
         """Load runtime scan config overrides written by the API."""

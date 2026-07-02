@@ -24,6 +24,8 @@ export interface StandaloneCanvas {
   edges: Edge<EdgeData>[]
   theme_id?: ThemeId
   custom_style?: CustomStyleDef | null
+  // NOTE: no floor plan here — floor plans need a backend to upload/serve the
+  // image, so they are disabled in standalone mode (see homelable/CLAUDE.md ADR).
 }
 
 function readJSON<T>(key: string): T | null {

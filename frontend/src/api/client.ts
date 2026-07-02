@@ -41,6 +41,17 @@ export const canvasApi = {
   }) => api.post('/canvas/save', payload),
 }
 
+export const mediaApi = {
+  /** Upload an image, returns its server URL (e.g. /api/v1/media/<uuid>.png). */
+  upload: async (file: File): Promise<{ url: string; filename: string }> => {
+    const form = new FormData()
+    form.append('file', file)
+    const res = await api.post<{ url: string; filename: string }>('/media/upload', form)
+    return res.data
+  },
+  delete: (filename: string) => api.delete(`/media/${filename}`),
+}
+
 export const nodesApi = {
   create: (data: object) => api.post('/nodes', data),
   update: (id: string, data: object) => api.patch(`/nodes/${id}`, data),

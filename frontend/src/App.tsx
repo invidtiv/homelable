@@ -41,14 +41,14 @@ import { canvasApi, designsApi, liveviewApi } from '@/api/client'
 import * as standaloneStorage from '@/utils/standaloneStorage'
 import { demoNodes, demoEdges } from '@/utils/demoData'
 import { useStatusPolling } from '@/hooks/useStatusPolling'
-import type { NodeData, EdgeData, CustomStyleDef } from '@/types'
+import type { NodeData, EdgeData, CustomStyleDef, FloorMapConfig } from '@/types'
 import type { ZigbeeNode, ZigbeeEdge } from '@/components/zigbee/types'
 import type { ZwaveNode, ZwaveEdge } from '@/components/zwave/types'
 
 const STANDALONE = import.meta.env.VITE_STANDALONE === 'true'
 
 export default function App() {
-  const { loadCanvas, markSaved, markUnsaved, selectedNodeId, selectedNodeIds, addNode, updateNode, deleteNode, onConnect, updateEdge, deleteEdge, setProxmoxContainerMode, setNodeZIndex, editingGroupRectId, setEditingGroupRectId, editingTextId, setEditingTextId, nodes, edges, snapshotHistory, undo, redo, addToGroup, addToContainer } = useCanvasStore()
+  const { loadCanvas, markSaved, markUnsaved, selectedNodeId, selectedNodeIds, addNode, updateNode, deleteNode, onConnect, updateEdge, deleteEdge, setProxmoxContainerMode, setNodeZIndex, editingGroupRectId, setEditingGroupRectId, editingTextId, setEditingTextId, nodes, edges, snapshotHistory, undo, redo, addToGroup, addToContainer, floorMap, setFloorMap } = useCanvasStore()
   const canvasRef = useRef<HTMLDivElement>(null)
   const { isAuthenticated } = useAuthStore()
   const { activeTheme, setTheme, customStyle, setCustomStyle } = useThemeStore()
@@ -91,6 +91,7 @@ export default function App() {
       const saveDesignId = designIdOverride ?? activeDesignId
       if (STANDALONE) {
         if (!saveDesignId) return false
+        // Floor plans are backend-only (upload/serve), so standalone never persists one.
         standaloneStorage.saveCanvas(saveDesignId, { nodes, edges, theme_id: activeTheme, custom_style: customStyle })
         markSaved()
         toast.success('Canvas saved')
@@ -98,7 +99,9 @@ export default function App() {
       }
       const nodesToSave = nodes.map(serializeNode)
       const edgesToSave = edges.map(serializeEdge)
-      await canvasApi.save({ nodes: nodesToSave, edges: edgesToSave, viewport: { theme_id: activeTheme }, custom_style: customStyle, design_id: saveDesignId })
+      const viewport: Record<string, unknown> = { theme_id: activeTheme }
+      if (floorMap) viewport.floor_map = floorMap
+      await canvasApi.save({ nodes: nodesToSave, edges: edgesToSave, viewport, custom_style: customStyle, design_id: saveDesignId })
       markSaved()
       toast.success('Canvas saved')
       return true
@@ -106,7 +109,7 @@ export default function App() {
       toast.error('Save failed')
       return false
     }
-  }, [nodes, edges, markSaved, activeTheme, customStyle, activeDesignId])
+  }, [nodes, edges, markSaved, activeTheme, customStyle, activeDesignId, floorMap])
 
   // Keep a ref so the keydown handler always calls the latest version
   const handleSaveRef = useRef(handleSave)
@@ -127,14 +130,20 @@ export default function App() {
         const savedTheme = res.data.viewport?.theme_id
         if (savedTheme) setTheme(savedTheme)
         if (res.data.custom_style) setCustomStyle(res.data.custom_style as CustomStyleDef)
+        const savedFloorMap = res.data.viewport?.floor_map as FloorMapConfig | undefined
+        // Clear when the target design has no floor plan, so it doesn't bleed
+        // across canvases when switching designs.
+        setFloorMap(savedFloorMap ?? null)
         loadCanvas(rfNodes, rfEdges)
       } else {
+        setFloorMap(null)
         loadCanvas(demoNodes, demoEdges)
       }
     } catch {
+      setFloorMap(null)
       loadCanvas(demoNodes, demoEdges)
     }
-  }, [loadCanvas, setTheme, setCustomStyle])
+  }, [loadCanvas, setTheme, setCustomStyle, setFloorMap])
 
   // Standalone counterpart of loadCanvasFromApi — reads a design's canvas from
   // localStorage, falling back to the demo canvas when it has never been saved.
@@ -143,11 +152,14 @@ export default function App() {
     if (saved && saved.nodes.length > 0) {
       if (saved.theme_id) setTheme(saved.theme_id)
       if (saved.custom_style) setCustomStyle(saved.custom_style)
+      // Floor plans are backend-only; keep the store clear in standalone mode.
+      setFloorMap(null)
       loadCanvas(saved.nodes, saved.edges)
     } else {
+      setFloorMap(null)
       loadCanvas(demoNodes, demoEdges)
     }
-  }, [loadCanvas, setTheme, setCustomStyle])
+  }, [loadCanvas, setTheme, setCustomStyle, setFloorMap])
 
   const loadDesignsAndCanvas = useCallback(async () => {
     if (STANDALONE) {
