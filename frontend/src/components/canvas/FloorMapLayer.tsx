@@ -1,9 +1,6 @@
 import { useCallback, useRef } from 'react'
+import { ViewportPortal, useReactFlow, useStore } from '@xyflow/react'
 import { useCanvasStore } from '@/stores/canvasStore'
-
-interface FloorMapLayerProps {
-  screenToFlowPosition: (pos: { x: number; y: number }) => { x: number; y: number }
-}
 
 interface ResizeState {
   startMouseX: number
@@ -15,9 +12,19 @@ interface ResizeState {
   edges: Set<'n' | 's' | 'e' | 'w'>
 }
 
-export function FloorMapLayer({ screenToFlowPosition }: FloorMapLayerProps) {
+/**
+ * Floor plan background rendered INSIDE the React Flow viewport (via
+ * ViewportPortal) so it pans and zooms together with the nodes. Position and
+ * size are stored in flow coordinates.
+ *
+ * When unlocked it sits above the nodes so it can be grabbed/resized; when
+ * locked it drops behind everything to act as a static background.
+ */
+export function FloorMapLayer() {
   const floorMap = useCanvasStore((s) => s.floorMap)
   const updateFloorMap = useCanvasStore((s) => s.updateFloorMap)
+  const { screenToFlowPosition } = useReactFlow()
+  const zoom = useStore((s) => s.transform[2])
 
   const resizeRef = useRef<ResizeState | null>(null)
 
@@ -91,55 +98,63 @@ export function FloorMapLayer({ screenToFlowPosition }: FloorMapLayerProps) {
 
   const { imageData, posX, posY, width, height, opacity, locked } = floorMap
 
+  // Handles live in flow space, so counter-scale by zoom to keep a ~constant
+  // on-screen size regardless of the current zoom level.
+  const hsz = 10 / zoom
+  const half = hsz / 2
   const hs: React.CSSProperties = {
     position: 'absolute',
-    width: 10,
-    height: 10,
+    width: hsz,
+    height: hsz,
     background: '#00d4ff',
-    border: '2px solid #0d1117',
-    borderRadius: 2,
+    border: `${2 / zoom}px solid #0d1117`,
+    borderRadius: 2 / zoom,
     zIndex: 10,
   }
 
   return (
-    <div
-      style={{
-        position: 'absolute',
-        left: posX,
-        top: posY,
-        width,
-        height,
-        opacity,
-        zIndex: -1,
-        pointerEvents: locked ? 'none' : 'auto',
-        cursor: locked ? 'default' : 'move',
-      }}
-      onMouseDown={locked ? undefined : onDragStart}
-    >
-      <img
-        src={imageData}
-        alt="Floor plan"
-        draggable={false}
+    <ViewportPortal>
+      <div
         style={{
-          width: '100%',
-          height: '100%',
-          objectFit: 'fill',
-          pointerEvents: 'none',
-          userSelect: 'none',
+          position: 'absolute',
+          left: posX,
+          top: posY,
+          width,
+          height,
+          opacity,
+          // Unlocked → above nodes so it can be grabbed. Locked → behind
+          // everything as a static background.
+          zIndex: locked ? -1 : 4,
+          pointerEvents: locked ? 'none' : 'auto',
+          cursor: locked ? 'default' : 'move',
         }}
-      />
-      {!locked && (
-        <>
-          <div style={{ ...hs, cursor: 'nw-resize', top: -5, left: -5 }} onMouseDown={(e) => onResizeStart(e, new Set(['n','w']))} />
-          <div style={{ ...hs, cursor: 'n-resize', top: -5, left: '50%', marginLeft: -5 }} onMouseDown={(e) => onResizeStart(e, new Set(['n']))} />
-          <div style={{ ...hs, cursor: 'ne-resize', top: -5, right: -5 }} onMouseDown={(e) => onResizeStart(e, new Set(['n','e']))} />
-          <div style={{ ...hs, cursor: 'e-resize', top: '50%', marginTop: -5, right: -5 }} onMouseDown={(e) => onResizeStart(e, new Set(['e']))} />
-          <div style={{ ...hs, cursor: 'se-resize', bottom: -5, right: -5 }} onMouseDown={(e) => onResizeStart(e, new Set(['s','e']))} />
-          <div style={{ ...hs, cursor: 's-resize', bottom: -5, left: '50%', marginLeft: -5 }} onMouseDown={(e) => onResizeStart(e, new Set(['s']))} />
-          <div style={{ ...hs, cursor: 'sw-resize', bottom: -5, left: -5 }} onMouseDown={(e) => onResizeStart(e, new Set(['s','w']))} />
-          <div style={{ ...hs, cursor: 'w-resize', top: '50%', marginTop: -5, left: -5 }} onMouseDown={(e) => onResizeStart(e, new Set(['w']))} />
-        </>
-      )}
-    </div>
+        onMouseDown={locked ? undefined : onDragStart}
+      >
+        <img
+          src={imageData}
+          alt="Floor plan"
+          draggable={false}
+          style={{
+            width: '100%',
+            height: '100%',
+            objectFit: 'fill',
+            pointerEvents: 'none',
+            userSelect: 'none',
+          }}
+        />
+        {!locked && (
+          <>
+            <div style={{ ...hs, cursor: 'nw-resize', top: -half, left: -half }} onMouseDown={(e) => onResizeStart(e, new Set(['n','w']))} />
+            <div style={{ ...hs, cursor: 'n-resize', top: -half, left: '50%', marginLeft: -half }} onMouseDown={(e) => onResizeStart(e, new Set(['n']))} />
+            <div style={{ ...hs, cursor: 'ne-resize', top: -half, right: -half }} onMouseDown={(e) => onResizeStart(e, new Set(['n','e']))} />
+            <div style={{ ...hs, cursor: 'e-resize', top: '50%', marginTop: -half, right: -half }} onMouseDown={(e) => onResizeStart(e, new Set(['e']))} />
+            <div style={{ ...hs, cursor: 'se-resize', bottom: -half, right: -half }} onMouseDown={(e) => onResizeStart(e, new Set(['s','e']))} />
+            <div style={{ ...hs, cursor: 's-resize', bottom: -half, left: '50%', marginLeft: -half }} onMouseDown={(e) => onResizeStart(e, new Set(['s']))} />
+            <div style={{ ...hs, cursor: 'sw-resize', bottom: -half, left: -half }} onMouseDown={(e) => onResizeStart(e, new Set(['s','w']))} />
+            <div style={{ ...hs, cursor: 'w-resize', top: '50%', marginTop: -half, left: -half }} onMouseDown={(e) => onResizeStart(e, new Set(['w']))} />
+          </>
+        )}
+      </div>
+    </ViewportPortal>
   )
 }

@@ -26,7 +26,6 @@ import { SettingsModal } from '@/components/modals/SettingsModal'
 import { ZigbeeImportModal } from '@/components/zigbee/ZigbeeImportModal'
 import { ZwaveImportModal } from '@/components/zwave/ZwaveImportModal'
 import { GroupRectModal, type GroupRectFormData } from '@/components/modals/GroupRectModal'
-import { FloorMapModal } from '@/components/modals/FloorMapModal'
 import { TextModal, type TextFormData } from '@/components/modals/TextModal'
 import { ThemeModal } from '@/components/modals/ThemeModal'
 import { SearchModal } from '@/components/modals/SearchModal'
@@ -83,7 +82,6 @@ export default function App() {
   const [exportModalOpen, setExportModalOpen] = useState(false)
   const [zigbeeImportOpen, setZigbeeImportOpen] = useState(false)
   const [zwaveImportOpen, setZwaveImportOpen] = useState(false)
-  const [floorMapModalOpen, setFloorMapModalOpen] = useState(false)
 
   // Declare handleSave before the Ctrl+S effect so it is in scope.
   // Returns true on success, false on failure — the design-switch effect relies
@@ -93,7 +91,8 @@ export default function App() {
       const saveDesignId = designIdOverride ?? activeDesignId
       if (STANDALONE) {
         if (!saveDesignId) return false
-        standaloneStorage.saveCanvas(saveDesignId, { nodes, edges, theme_id: activeTheme, custom_style: customStyle, floorMap: floorMap ?? undefined })
+        // Floor plans are backend-only (upload/serve), so standalone never persists one.
+        standaloneStorage.saveCanvas(saveDesignId, { nodes, edges, theme_id: activeTheme, custom_style: customStyle })
         markSaved()
         toast.success('Canvas saved')
         return true
@@ -132,12 +131,16 @@ export default function App() {
         if (savedTheme) setTheme(savedTheme)
         if (res.data.custom_style) setCustomStyle(res.data.custom_style as CustomStyleDef)
         const savedFloorMap = res.data.viewport?.floor_map as FloorMapConfig | undefined
-        if (savedFloorMap) setFloorMap(savedFloorMap)
+        // Clear when the target design has no floor plan, so it doesn't bleed
+        // across canvases when switching designs.
+        setFloorMap(savedFloorMap ?? null)
         loadCanvas(rfNodes, rfEdges)
       } else {
+        setFloorMap(null)
         loadCanvas(demoNodes, demoEdges)
       }
     } catch {
+      setFloorMap(null)
       loadCanvas(demoNodes, demoEdges)
     }
   }, [loadCanvas, setTheme, setCustomStyle, setFloorMap])
@@ -149,9 +152,11 @@ export default function App() {
     if (saved && saved.nodes.length > 0) {
       if (saved.theme_id) setTheme(saved.theme_id)
       if (saved.custom_style) setCustomStyle(saved.custom_style)
-      if (saved.floorMap) setFloorMap(saved.floorMap)
+      // Floor plans are backend-only; keep the store clear in standalone mode.
+      setFloorMap(null)
       loadCanvas(saved.nodes, saved.edges)
     } else {
+      setFloorMap(null)
       loadCanvas(demoNodes, demoEdges)
     }
   }, [loadCanvas, setTheme, setCustomStyle, setFloorMap])
@@ -525,25 +530,6 @@ export default function App() {
     }
   }, [activeDesignId])
 
-  const handleFloorMapSubmit = useCallback((config: FloorMapConfig) => {
-    snapshotHistory()
-    if (floorMap) {
-      // Preserve position from existing config when editing
-      setFloorMap({ ...floorMap, ...config })
-    } else {
-      setFloorMap(config)
-    }
-    setFloorMapModalOpen(false)
-    toast.success(floorMap ? 'Floor plan updated' : 'Floor plan imported')
-  }, [floorMap, setFloorMap, snapshotHistory])
-
-  const handleFloorMapRemove = useCallback(() => {
-    snapshotHistory()
-    setFloorMap(null)
-    setFloorMapModalOpen(false)
-    toast.success('Floor plan removed')
-  }, [setFloorMap, snapshotHistory])
-
   const handleExport = useCallback(() => {
     const el = canvasRef.current?.querySelector<HTMLElement>('.react-flow')
     if (!el) { toast.error('Canvas not ready'); return }
@@ -723,7 +709,6 @@ export default function App() {
             onScan={() => setScanConfigOpen(true)}
             onZigbeeImport={() => setZigbeeImportOpen(true)}
             onZwaveImport={() => setZwaveImportOpen(true)}
-            onFloorMap={() => setFloorMapModalOpen(true)}
             onSave={handleSave}
             onOpenSettings={() => setSettingsOpen(true)}
             onOpenHistory={() => setScanHistoryOpen(true)}
@@ -859,15 +844,6 @@ export default function App() {
             onClose={() => setScanHistoryOpen(false)}
           />
         )}
-
-        <FloorMapModal
-          key={floorMapModalOpen ? 'floor-map-open' : 'floor-map-closed'}
-          open={floorMapModalOpen}
-          onClose={() => setFloorMapModalOpen(false)}
-          onSubmit={handleFloorMapSubmit}
-          onRemove={handleFloorMapRemove}
-          initial={floorMap}
-        />
 
         <GroupRectModal
           open={addGroupRectOpen}

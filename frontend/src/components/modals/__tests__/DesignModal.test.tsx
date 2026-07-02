@@ -64,4 +64,108 @@ describe('DesignModal', () => {
     expect(onClose).toHaveBeenCalled()
     expect(onSubmit).not.toHaveBeenCalled()
   })
+
+  describe('floor plan section', () => {
+    const fm = {
+      imageData: 'data:image/png;base64,abc',
+      posX: 40, posY: 60, width: 800, height: 600,
+      opacity: 0.8, locked: false, enabled: true,
+    }
+
+    it('is hidden by default and submit omits floorMap', () => {
+      const { onSubmit } = renderModal()
+      expect(screen.queryByText('Floor Plan')).toBeNull()
+      fireEvent.change(screen.getByLabelText('Name'), { target: { value: 'X' } })
+      fireEvent.click(screen.getByRole('button', { name: 'Create' }))
+      expect(onSubmit).toHaveBeenCalledWith({ name: 'X', icon: DEFAULT_DESIGN_ICON })
+      expect('floorMap' in onSubmit.mock.calls[0][0]).toBe(false)
+    })
+
+    it('shows the section and preserves position while updating config', () => {
+      const { onSubmit } = renderModal({
+        showFloorMap: true,
+        initialFloorMap: fm,
+        initial: { name: 'Home', icon: DEFAULT_DESIGN_ICON },
+        submitLabel: 'Save',
+      })
+      expect(screen.getByText('Floor Plan')).toBeDefined()
+      expect(screen.getByAltText('Floor plan preview')).toBeDefined()
+
+      // Toggle "Show on canvas" off.
+      const enabledBox = screen.getByLabelText('Show on canvas') as HTMLInputElement
+      fireEvent.click(enabledBox)
+
+      fireEvent.click(screen.getByRole('button', { name: 'Save' }))
+      expect(onSubmit).toHaveBeenCalledWith({
+        name: 'Home',
+        icon: DEFAULT_DESIGN_ICON,
+        floorMap: { ...fm, enabled: false },
+      })
+    })
+
+    it('submits floorMap: null when the image is removed', () => {
+      const { onSubmit } = renderModal({
+        showFloorMap: true,
+        initialFloorMap: fm,
+        initial: { name: 'Home', icon: DEFAULT_DESIGN_ICON },
+        submitLabel: 'Save',
+      })
+      fireEvent.click(screen.getByRole('button', { name: 'Remove' }))
+      expect(screen.queryByAltText('Floor plan preview')).toBeNull()
+      fireEvent.click(screen.getByRole('button', { name: 'Save' }))
+      expect(onSubmit).toHaveBeenCalledWith({
+        name: 'Home',
+        icon: DEFAULT_DESIGN_ICON,
+        floorMap: null,
+      })
+    })
+
+    it('uploads a chosen file and stores the returned server URL', async () => {
+      const onUploadImage = vi.fn().mockResolvedValue('/api/v1/media/deadbeef.png')
+      const { onSubmit } = renderModal({
+        showFloorMap: true,
+        initialFloorMap: null,
+        initial: { name: 'Home', icon: DEFAULT_DESIGN_ICON },
+        submitLabel: 'Save',
+        onUploadImage,
+      })
+      const file = new File(['x'], 'plan.png', { type: 'image/png' })
+      const input = document.querySelector('input[type="file"]') as HTMLInputElement
+      fireEvent.change(input, { target: { files: [file] } })
+
+      await screen.findByAltText('Floor plan preview')
+      expect(onUploadImage).toHaveBeenCalledWith(file)
+
+      fireEvent.click(screen.getByRole('button', { name: 'Save' }))
+      const submitted = onSubmit.mock.calls[0][0]
+      expect(submitted.floorMap.imageData).toBe('/api/v1/media/deadbeef.png')
+    })
+
+    it('leaves state untouched when upload fails', async () => {
+      const onUploadImage = vi.fn().mockRejectedValue(new Error('boom'))
+      renderModal({
+        showFloorMap: true,
+        initialFloorMap: null,
+        initial: { name: 'Home', icon: DEFAULT_DESIGN_ICON },
+        submitLabel: 'Save',
+        onUploadImage,
+      })
+      const file = new File(['x'], 'plan.png', { type: 'image/png' })
+      const input = document.querySelector('input[type="file"]') as HTMLInputElement
+      fireEvent.change(input, { target: { files: [file] } })
+      await vi.waitFor(() => expect(onUploadImage).toHaveBeenCalled())
+      expect(screen.queryByAltText('Floor plan preview')).toBeNull()
+    })
+
+    it('submits floorMap: null when shown but no image was chosen', () => {
+      const { onSubmit } = renderModal({
+        showFloorMap: true,
+        initialFloorMap: null,
+        submitLabel: 'Save',
+      })
+      fireEvent.change(screen.getByLabelText('Name'), { target: { value: 'Empty' } })
+      fireEvent.click(screen.getByRole('button', { name: 'Save' }))
+      expect(onSubmit).toHaveBeenCalledWith({ name: 'Empty', icon: DEFAULT_DESIGN_ICON, floorMap: null })
+    })
+  })
 })

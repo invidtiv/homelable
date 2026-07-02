@@ -200,7 +200,7 @@ export function CanvasContainer({ onConnect: onConnectProp, onEdgeDoubleClick, o
           size={1}
           color={theme.colors.canvasDotColor}
         />
-        <FloorMapLayer screenToFlowPosition={screenToFlowPosition} />
+        <FloorMapLayer />
         <SearchBar onOpenPending={onOpenPending} />
         <AlignmentGuides guides={guides} />
         <Controls>

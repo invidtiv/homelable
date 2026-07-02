@@ -1,11 +1,11 @@
 import { useState, useCallback } from 'react'
-import { Plus, Save, ScanLine, ChevronLeft, ChevronRight, LayoutDashboard, Clock, EyeOff, Square, Settings, LogOut, Network, RadioTower, Type, PlusCircle, Pencil, Trash2, Image } from 'lucide-react'
+import { Plus, Save, ScanLine, ChevronLeft, ChevronRight, LayoutDashboard, Clock, EyeOff, Square, Settings, LogOut, Network, RadioTower, Type, PlusCircle, Pencil, Trash2 } from 'lucide-react'
 import { Logo } from '@/components/ui/Logo'
 import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip'
 import { useCanvasStore } from '@/stores/canvasStore'
 import { useDesignStore } from '@/stores/designStore'
 import { useAuthStore } from '@/stores/authStore'
-import { designsApi } from '@/api/client'
+import { designsApi, mediaApi } from '@/api/client'
 import * as standaloneStorage from '@/utils/standaloneStorage'
 import { resolveDesignIcon, DEFAULT_DESIGN_ICON } from '@/utils/designIcons'
 import { DesignModal, type DesignFormData } from '@/components/modals/DesignModal'
@@ -27,19 +27,19 @@ interface SidebarProps {
   onScan: () => void
   onZigbeeImport: () => void
   onZwaveImport: () => void
-  onFloorMap: () => void
   onSave: () => void
   onOpenSettings: () => void
   onOpenHistory: () => void
   onOpenPending: (deviceId?: string, status?: 'pending' | 'hidden') => void
 }
 
-export function Sidebar({ onAddNode, onAddGroupRect, onAddText, onScan, onZigbeeImport, onZwaveImport, onFloorMap, onSave, onOpenSettings, onOpenHistory, onOpenPending }: SidebarProps) {
+export function Sidebar({ onAddNode, onAddGroupRect, onAddText, onScan, onZigbeeImport, onZwaveImport, onSave, onOpenSettings, onOpenHistory, onOpenPending }: SidebarProps) {
   const [collapsed, setCollapsed] = useState(false)
   const logout = useAuthStore((s) => s.logout)
   const { designs, activeDesignId, setActiveDesign, addDesign, updateDesign, removeDesign } = useDesignStore()
   const [designSwitcherOpen, setDesignSwitcherOpen] = useState(false)
   const [designModal, setDesignModal] = useState<{ mode: 'create' | 'edit'; design?: Design } | null>(null)
+  const { nodes, hasUnsavedChanges, floorMap, setFloorMap, snapshotHistory } = useCanvasStore()
 
   const handleDesignSubmit = useCallback(async (data: DesignFormData) => {
     if (!designModal) return
@@ -55,11 +55,18 @@ export function Sidebar({ onAddNode, onAddGroupRect, onAddText, onScan, onZigbee
           : (await designsApi.update(designModal.design.id, { name: data.name, icon: data.icon })).data
         if (updated) updateDesign(updated.id, { name: updated.name, icon: updated.icon })
       }
+      // Floor plan is canvas data attached to the active design. `undefined`
+      // means the section wasn't shown → leave it untouched. Applied to the
+      // store and persisted on the next explicit canvas Save.
+      if (data.floorMap !== undefined) {
+        snapshotHistory()
+        setFloorMap(data.floorMap)
+      }
       setDesignModal(null)
     } catch {
       toast.error(designModal.mode === 'create' ? 'Failed to create canvas' : 'Failed to update canvas')
     }
-  }, [designModal, addDesign, updateDesign])
+  }, [designModal, addDesign, updateDesign, setFloorMap, snapshotHistory])
 
   const handleDesignDelete = useCallback(async (d: Design) => {
     if (designs.length <= 1) { toast.error('Cannot delete the only canvas'); return }
@@ -77,7 +84,17 @@ export function Sidebar({ onAddNode, onAddGroupRect, onAddText, onScan, onZigbee
     }
   }, [designs.length, removeDesign])
 
-  const { nodes, hasUnsavedChanges, floorMap } = useCanvasStore()
+  const handleUploadImage = useCallback(async (file: File): Promise<string> => {
+    try {
+      const { url } = await mediaApi.upload(file)
+      return url
+    } catch {
+      toast.error('Image upload failed')
+      throw new Error('upload failed')
+    }
+  }, [])
+
+  const isActiveEdit = designModal?.mode === 'edit' && designModal.design?.id === activeDesignId
 
   const networkNodes = nodes.filter((n) => n.data.type !== 'groupRect' && n.data.type !== 'text')
   const onlineCount = networkNodes.filter((n) => n.data.status === 'online').length
@@ -229,7 +246,6 @@ export function Sidebar({ onAddNode, onAddGroupRect, onAddText, onScan, onZigbee
         {!STANDALONE && <SidebarItem icon={ScanLine} label="Scan Network" collapsed={collapsed} onClick={handleScan} />}
         {!STANDALONE && <SidebarItem icon={Network} label="Zigbee Import" collapsed={collapsed} onClick={onZigbeeImport} />}
         {!STANDALONE && <SidebarItem icon={RadioTower} label="Z-Wave Import" collapsed={collapsed} onClick={onZwaveImport} />}
-        <SidebarItem icon={Image} label={floorMap ? 'Edit Floor Plan' : 'Add Floor Plan'} collapsed={collapsed} onClick={onFloorMap} />
         <SidebarItem
           icon={Save}
           label="Save Canvas"
@@ -266,6 +282,9 @@ export function Sidebar({ onAddNode, onAddGroupRect, onAddText, onScan, onZigbee
           : undefined}
         title={designModal?.mode === 'edit' ? 'Edit Canvas' : 'New Canvas'}
         submitLabel={designModal?.mode === 'edit' ? 'Save' : 'Create'}
+        showFloorMap={!STANDALONE && isActiveEdit}
+        initialFloorMap={!STANDALONE && isActiveEdit ? floorMap : null}
+        onUploadImage={handleUploadImage}
       />
     </aside>
   )

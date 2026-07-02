@@ -11,7 +11,7 @@
  * default design on first run so existing users keep their canvas.
  */
 import type { Node, Edge } from '@xyflow/react'
-import type { Design, DesignType, NodeData, EdgeData, CustomStyleDef, FloorMapConfig } from '@/types'
+import type { Design, DesignType, NodeData, EdgeData, CustomStyleDef } from '@/types'
 import type { ThemeId } from '@/utils/themes'
 import { generateUUID } from '@/utils/uuid'
 
@@ -24,7 +24,8 @@ export interface StandaloneCanvas {
   edges: Edge<EdgeData>[]
   theme_id?: ThemeId
   custom_style?: CustomStyleDef | null
-  floorMap?: FloorMapConfig
+  // NOTE: no floor plan here — floor plans need a backend to upload/serve the
+  // image, so they are disabled in standalone mode (see homelable/CLAUDE.md ADR).
 }
 
 function readJSON<T>(key: string): T | null {

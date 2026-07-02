@@ -254,6 +254,11 @@ export interface CustomStyleDef {
 }
 
 export interface FloorMapConfig {
+  /**
+   * Server URL of the uploaded image (e.g. /api/v1/media/<uuid>.png).
+   * Legacy canvases may still hold a base64 `data:` URL — both render in <img>.
+   * Floor plans require a backend; they are disabled in standalone mode.
+   */
   imageData: string
   posX: number
   posY: number
