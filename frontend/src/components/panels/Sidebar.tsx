@@ -1,4 +1,4 @@
-import { useState, useCallback } from 'react'
+import { useState, useCallback, useEffect } from 'react'
 import { Plus, Save, ScanLine, ChevronLeft, ChevronRight, LayoutDashboard, Clock, EyeOff, Square, Settings, LogOut, Network, RadioTower, Type, PlusCircle, Pencil, Trash2 } from 'lucide-react'
 import { Logo } from '@/components/ui/Logo'
 import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip'
@@ -39,7 +39,17 @@ export function Sidebar({ onAddNode, onAddGroupRect, onAddText, onScan, onZigbee
   const { designs, activeDesignId, setActiveDesign, addDesign, updateDesign, removeDesign } = useDesignStore()
   const [designSwitcherOpen, setDesignSwitcherOpen] = useState(false)
   const [designModal, setDesignModal] = useState<{ mode: 'create' | 'edit'; design?: Design } | null>(null)
-  const { nodes, hasUnsavedChanges, floorMap, setFloorMap, snapshotHistory } = useCanvasStore()
+  // Bumped on every open so the modal remounts and re-seeds its local state from
+  // the current floor plan — otherwise a reopen keeps stale width/height/lock
+  // and Save would clobber canvas-side resize/move.
+  const [openSeq, setOpenSeq] = useState(0)
+  const { nodes, hasUnsavedChanges, floorMap, setFloorMap } = useCanvasStore()
+  const floorMapEditNonce = useCanvasStore((s) => s.floorMapEditNonce)
+
+  const openDesignModal = useCallback((m: { mode: 'create' | 'edit'; design?: Design }) => {
+    setOpenSeq((s) => s + 1)
+    setDesignModal(m)
+  }, [])
 
   const handleDesignSubmit = useCallback(async (data: DesignFormData) => {
     if (!designModal) return
@@ -57,16 +67,16 @@ export function Sidebar({ onAddNode, onAddGroupRect, onAddText, onScan, onZigbee
       }
       // Floor plan is canvas data attached to the active design. `undefined`
       // means the section wasn't shown → leave it untouched. Applied to the
-      // store and persisted on the next explicit canvas Save.
+      // store and persisted on the next explicit canvas Save. Not pushed to
+      // undo history (floorMap isn't part of HistoryEntry).
       if (data.floorMap !== undefined) {
-        snapshotHistory()
         setFloorMap(data.floorMap)
       }
       setDesignModal(null)
     } catch {
       toast.error(designModal.mode === 'create' ? 'Failed to create canvas' : 'Failed to update canvas')
     }
-  }, [designModal, addDesign, updateDesign, setFloorMap, snapshotHistory])
+  }, [designModal, addDesign, updateDesign, setFloorMap])
 
   const handleDesignDelete = useCallback(async (d: Design) => {
     if (designs.length <= 1) { toast.error('Cannot delete the only canvas'); return }
@@ -95,6 +105,15 @@ export function Sidebar({ onAddNode, onAddGroupRect, onAddText, onScan, onZigbee
   }, [])
 
   const isActiveEdit = designModal?.mode === 'edit' && designModal.design?.id === activeDesignId
+
+  // Double-click on the floor plan (canvas) asks to edit the active canvas.
+  useEffect(() => {
+    if (floorMapEditNonce === 0) return
+    const active = designs.find((d) => d.id === activeDesignId)
+    if (active) openDesignModal({ mode: 'edit', design: active })
+    // Only react to the nonce bump, not to design/active changes.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [floorMapEditNonce])
 
   const networkNodes = nodes.filter((n) => n.data.type !== 'groupRect' && n.data.type !== 'text')
   const onlineCount = networkNodes.filter((n) => n.data.status === 'online').length
@@ -160,7 +179,7 @@ export function Sidebar({ onAddNode, onAddGroupRect, onAddText, onScan, onZigbee
                       <button
                         aria-label={`Edit ${d.name}`}
                         title="Edit canvas"
-                        onClick={() => { setDesignModal({ mode: 'edit', design: d }); setDesignSwitcherOpen(false) }}
+                        onClick={() => { openDesignModal({ mode: 'edit', design: d }); setDesignSwitcherOpen(false) }}
                         className="shrink-0 p-1.5 text-muted-foreground hover:text-foreground cursor-pointer opacity-0 group-hover:opacity-100 transition-opacity"
                       >
                         <Pencil size={12} />
@@ -179,7 +198,7 @@ export function Sidebar({ onAddNode, onAddGroupRect, onAddText, onScan, onZigbee
                 })}
                 <div className="border-t border-border" />
                 <button
-                  onClick={() => { setDesignModal({ mode: 'create' }); setDesignSwitcherOpen(false) }}
+                  onClick={() => { openDesignModal({ mode: 'create' }); setDesignSwitcherOpen(false) }}
                   className="flex items-center gap-2 w-full px-3 py-2 text-xs text-[#00d4ff] hover:bg-[#00d4ff]/10 transition-colors cursor-pointer"
                 >
                   <PlusCircle size={14} />
@@ -273,7 +292,7 @@ export function Sidebar({ onAddNode, onAddGroupRect, onAddText, onScan, onZigbee
       {!collapsed && <VersionBadge />}
 
       <DesignModal
-        key={designModal?.mode === 'edit' ? designModal.design?.id : 'create'}
+        key={`${designModal?.mode === 'edit' ? designModal.design?.id : 'create'}-${openSeq}`}
         open={!!designModal}
         onClose={() => setDesignModal(null)}
         onSubmit={handleDesignSubmit}

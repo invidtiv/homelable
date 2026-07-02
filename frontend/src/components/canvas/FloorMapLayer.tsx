@@ -1,4 +1,4 @@
-import { useCallback, useRef } from 'react'
+import { useCallback, useEffect, useRef, useState } from 'react'
 import { ViewportPortal, useReactFlow, useStore } from '@xyflow/react'
 import { useCanvasStore } from '@/stores/canvasStore'
 
@@ -17,20 +17,40 @@ interface ResizeState {
  * ViewportPortal) so it pans and zooms together with the nodes. Position and
  * size are stored in flow coordinates.
  *
- * When unlocked it sits above the nodes so it can be grabbed/resized; when
- * locked it drops behind everything to act as a static background.
+ * It always sits at the bottom of the canvas (behind nodes and edges). When
+ * unlocked it can still be grabbed/resized in areas not covered by a node;
+ * resize handles appear only while it is selected. Double-clicking an unlocked
+ * plan opens its edit modal.
  */
 export function FloorMapLayer() {
   const floorMap = useCanvasStore((s) => s.floorMap)
   const updateFloorMap = useCanvasStore((s) => s.updateFloorMap)
+  const requestFloorMapEdit = useCanvasStore((s) => s.requestFloorMapEdit)
   const { screenToFlowPosition } = useReactFlow()
   const zoom = useStore((s) => s.transform[2])
 
   const resizeRef = useRef<ResizeState | null>(null)
+  const wrapperRef = useRef<HTMLDivElement>(null)
+  const [selected, setSelected] = useState(false)
+
+  const locked = floorMap?.locked ?? false
+
+  // While selected (and unlocked), deselect on any click outside the plan.
+  // A locked plan can't be selected, and handles/edit are gated on !locked, so
+  // a residual selection is harmless.
+  useEffect(() => {
+    if (locked || !selected) return
+    const onDocDown = (ev: MouseEvent) => {
+      if (!wrapperRef.current?.contains(ev.target as Node)) setSelected(false)
+    }
+    document.addEventListener('mousedown', onDocDown)
+    return () => document.removeEventListener('mousedown', onDocDown)
+  }, [selected, locked])
 
   const onDragStart = useCallback((e: React.MouseEvent) => {
     if (!floorMap) return
     e.stopPropagation()
+    setSelected(true)
     const startX = e.clientX
     const startY = e.clientY
     const origPosX = floorMap.posX
@@ -96,7 +116,7 @@ export function FloorMapLayer() {
 
   if (!floorMap || !floorMap.enabled) return null
 
-  const { imageData, posX, posY, width, height, opacity, locked } = floorMap
+  const { imageData, posX, posY, width, height, opacity } = floorMap
 
   // Handles live in flow space, so counter-scale by zoom to keep a ~constant
   // on-screen size regardless of the current zoom level.
@@ -115,6 +135,7 @@ export function FloorMapLayer() {
   return (
     <ViewportPortal>
       <div
+        ref={wrapperRef}
         style={{
           position: 'absolute',
           left: posX,
@@ -122,13 +143,13 @@ export function FloorMapLayer() {
           width,
           height,
           opacity,
-          // Unlocked → above nodes so it can be grabbed. Locked → behind
-          // everything as a static background.
-          zIndex: locked ? -1 : 4,
+          // Always at the bottom of the canvas, behind nodes and edges.
+          zIndex: -1,
           pointerEvents: locked ? 'none' : 'auto',
           cursor: locked ? 'default' : 'move',
         }}
         onMouseDown={locked ? undefined : onDragStart}
+        onDoubleClick={locked ? undefined : (e) => { e.stopPropagation(); requestFloorMapEdit() }}
       >
         <img
           src={imageData}
@@ -142,7 +163,7 @@ export function FloorMapLayer() {
             userSelect: 'none',
           }}
         />
-        {!locked && (
+        {!locked && selected && (
           <>
             <div style={{ ...hs, cursor: 'nw-resize', top: -half, left: -half }} onMouseDown={(e) => onResizeStart(e, new Set(['n','w']))} />
             <div style={{ ...hs, cursor: 'n-resize', top: -half, left: '50%', marginLeft: -half }} onMouseDown={(e) => onResizeStart(e, new Set(['n']))} />

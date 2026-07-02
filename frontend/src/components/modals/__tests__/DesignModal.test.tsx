@@ -157,6 +157,43 @@ describe('DesignModal', () => {
       expect(screen.queryByAltText('Floor plan preview')).toBeNull()
     })
 
+    // Regression: reopening the edit modal after a canvas-side resize must not
+    // save stale dimensions. Sidebar bumps the modal `key` on every open so it
+    // remounts and re-seeds from the current floor plan.
+    it('re-seeds width/height when remounted with a new key (reopen after resize)', () => {
+      const onSubmit = vi.fn()
+      const initial = { name: 'Home', icon: DEFAULT_DESIGN_ICON }
+      const { rerender } = render(
+        <DesignModal key="k1" open onClose={vi.fn()} onSubmit={onSubmit}
+          showFloorMap initialFloorMap={fm} initial={initial} submitLabel="Save" />,
+      )
+      // Canvas-side resize happened; reopen with a fresh key + larger dims.
+      const resized = { ...fm, width: 1200, height: 900 }
+      rerender(
+        <DesignModal key="k2" open onClose={vi.fn()} onSubmit={onSubmit}
+          showFloorMap initialFloorMap={resized} initial={initial} submitLabel="Save" />,
+      )
+      fireEvent.click(screen.getByRole('button', { name: 'Save' }))
+      expect(onSubmit.mock.calls[0][0].floorMap).toMatchObject({ width: 1200, height: 900 })
+    })
+
+    it('keeps stale dimensions when reopened without remount (why the key bump matters)', () => {
+      const onSubmit = vi.fn()
+      const initial = { name: 'Home', icon: DEFAULT_DESIGN_ICON }
+      const { rerender } = render(
+        <DesignModal key="same" open onClose={vi.fn()} onSubmit={onSubmit}
+          showFloorMap initialFloorMap={fm} initial={initial} submitLabel="Save" />,
+      )
+      const resized = { ...fm, width: 1200, height: 900 }
+      rerender(
+        <DesignModal key="same" open onClose={vi.fn()} onSubmit={onSubmit}
+          showFloorMap initialFloorMap={resized} initial={initial} submitLabel="Save" />,
+      )
+      fireEvent.click(screen.getByRole('button', { name: 'Save' }))
+      // Same key → no remount → local state still the original 800×600.
+      expect(onSubmit.mock.calls[0][0].floorMap).toMatchObject({ width: 800, height: 600 })
+    })
+
     it('submits floorMap: null when shown but no image was chosen', () => {
       const { onSubmit } = renderModal({
         showFloorMap: true,

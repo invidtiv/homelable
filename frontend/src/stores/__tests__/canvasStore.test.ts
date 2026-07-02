@@ -1337,5 +1337,12 @@ describe('canvasStore — custom style apply', () => {
       useCanvasStore.getState().updateFloorMap({ posX: 5 })
       expect(useCanvasStore.getState().floorMap).toBeNull()
     })
+
+    it('requestFloorMapEdit bumps the nonce each call', () => {
+      const start = useCanvasStore.getState().floorMapEditNonce
+      useCanvasStore.getState().requestFloorMapEdit()
+      useCanvasStore.getState().requestFloorMapEdit()
+      expect(useCanvasStore.getState().floorMapEditNonce).toBe(start + 2)
+    })
   })
 })
