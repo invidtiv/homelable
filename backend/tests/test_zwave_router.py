@@ -374,7 +374,9 @@ async def test_persist_sets_coordinator_pending_fields(db_session) -> None:
 
 
 @pytest.mark.asyncio
-async def test_persist_skips_pending_for_approved_node(db_session) -> None:
+async def test_persist_backfills_inventory_for_approved_node(db_session) -> None:
+    """On-canvas device missing its inventory row gets one backfilled
+    (status="approved"); Node props still refresh."""
     from sqlalchemy import select
 
     from app.api.routes.zwave import _persist_pending_import
@@ -394,12 +396,13 @@ async def test_persist_skips_pending_for_approved_node(db_session) -> None:
 
     await _persist_pending_import(db_session, _PENDING_NODES, _PENDING_EDGES)
 
-    pendings = (
+    inv = (
         await db_session.execute(
             select(PendingDevice).where(PendingDevice.ieee_address == "zwave-0xh-2")
         )
-    ).scalars().all()
-    assert pendings == []
+    ).scalar_one()
+    assert inv.status == "approved"
+    assert inv.suggested_type == "zwave_router"
     refreshed = (
         await db_session.execute(select(Node).where(Node.ieee_address == "zwave-0xh-2"))
     ).scalar_one()

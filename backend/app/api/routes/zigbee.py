@@ -162,9 +162,11 @@ async def _persist_pending_import(
         # the pending inventory like every other device, so the user approves it
         # explicitly. Only the shared paths below run for it.
 
-        # If the device has already been approved as a canvas Node, refresh
-        # its properties on every canvas it sits on and skip creating a pending
-        # row (keeps approved devices out of pending/hidden modals on re-import).
+        # If the device has already been approved as a canvas Node, refresh its
+        # properties on every canvas it sits on. Still ensure the discovery
+        # inventory carries a row for it (status="approved") so it shows in the
+        # inventory list with an "In N canvas" badge — legacy auto-placed
+        # coordinators never got a pending row, which is why they went missing.
         existing_nodes = (
             await db.execute(
                 select(Node).where(Node.ieee_address == ieee).order_by(Node.id)
@@ -175,6 +177,38 @@ async def _persist_pending_import(
                 existing_node.properties = merge_zigbee_properties(
                     existing_node.properties, props
                 )
+            inv = (
+                await db.execute(
+                    select(PendingDevice).where(PendingDevice.ieee_address == ieee)
+                )
+            ).scalar_one_or_none()
+            if inv is None:
+                db.add(
+                    PendingDevice(
+                        ieee_address=ieee,
+                        friendly_name=n.get("friendly_name"),
+                        hostname=n.get("friendly_name"),
+                        suggested_type=n.get("type"),
+                        device_subtype=n.get("device_type"),
+                        model=n.get("model"),
+                        vendor=n.get("vendor"),
+                        lqi=n.get("lqi"),
+                        status="approved",
+                        discovery_source="zigbee",
+                    )
+                )
+                pending_created += 1
+            else:
+                # Refresh metadata but never change the row's status (an approved
+                # device stays approved; a hidden one stays hidden).
+                inv.friendly_name = n.get("friendly_name") or inv.friendly_name
+                inv.suggested_type = n.get("type") or inv.suggested_type
+                inv.device_subtype = n.get("device_type") or inv.device_subtype
+                inv.model = n.get("model") or inv.model
+                inv.vendor = n.get("vendor") or inv.vendor
+                if n.get("lqi") is not None:
+                    inv.lqi = n.get("lqi")
+                pending_updated += 1
             continue
 
         result = await db.execute(
