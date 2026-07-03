@@ -7,6 +7,8 @@ import { Dialog, DialogClose, DialogContent, DialogHeader, DialogTitle } from '@
 import { scanApi } from '@/api/client'
 import { useCanvasStore } from '@/stores/canvasStore'
 import { useDesignStore } from '@/stores/designStore'
+import { useThemeStore } from '@/stores/themeStore'
+import { resolveNodeColors } from '@/utils/nodeColors'
 import { toast } from 'sonner'
 import { PendingDeviceModal, type PendingDevice } from '@/components/modals/PendingDeviceModal'
 import type { NodeType, ServiceInfo } from '@/types'
@@ -657,7 +659,12 @@ interface DeviceCardProps {
 
 function DeviceCard({ device, selected, selectMode, highlighted, onClick, cardRef }: DeviceCardProps) {
   const source = inferSource(device)
-  const Icon = TYPE_ICONS[device.suggested_type ?? 'generic'] ?? Circle
+  const roleType = (device.suggested_type ?? 'generic') as NodeType
+  const Icon = TYPE_ICONS[roleType] ?? Circle
+  const activeTheme = useThemeStore((s) => s.activeTheme)
+  // Colour the role badge with the same accent the node uses on the canvas
+  // (from the active theme / style section), instead of a flat grey.
+  const roleColor = resolveNodeColors({ type: roleType, custom_colors: undefined }, activeTheme).border
   const label = deviceLabel(device)
   const sourceColor = source === 'zigbee' ? '#00d4ff' : source === 'zwave' ? '#ff6e00' : '#a855f7'
   const sourceLabel =
@@ -734,7 +741,10 @@ function DeviceCard({ device, selected, selectMode, highlighted, onClick, cardRe
               {sourceLabel}
             </span>
             {device.suggested_type && (
-              <span className="text-[9px] font-mono px-1.5 py-0.5 rounded uppercase tracking-wider bg-[#21262d] text-muted-foreground">
+              <span
+                className="text-[9px] font-mono px-1.5 py-0.5 rounded uppercase tracking-wider"
+                style={{ background: `${roleColor}22`, color: roleColor }}
+              >
                 {device.suggested_type}
               </span>
             )}
