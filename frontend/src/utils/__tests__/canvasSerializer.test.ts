@@ -305,6 +305,26 @@ describe('deserializeApiNode — regular node', () => {
     expect(result.height).toBeUndefined()
   })
 
+  // Backward-compat: pre-#243 saves have no top/left/right_handles fields.
+  it('defaults per-side handle counts for legacy nodes (top/bottom=1, left/right=0)', () => {
+    const result = deserializeApiNode(makeApiNode(), emptyMap)
+    expect(result.data.top_handles).toBe(1)
+    expect(result.data.bottom_handles).toBe(1)
+    expect(result.data.left_handles).toBe(0)
+    expect(result.data.right_handles).toBe(0)
+  })
+
+  it('round-trips explicit per-side handle counts', () => {
+    const result = deserializeApiNode(
+      makeApiNode({ top_handles: 2, bottom_handles: 5, left_handles: 3, right_handles: 1 }),
+      emptyMap,
+    )
+    expect(result.data.top_handles).toBe(2)
+    expect(result.data.bottom_handles).toBe(5)
+    expect(result.data.left_handles).toBe(3)
+    expect(result.data.right_handles).toBe(1)
+  })
+
   it('sets parentId and extent for children of container proxmox', () => {
     const map = new Map([['px1', true]])
     const result = deserializeApiNode(makeApiNode({ parent_id: 'px1' }), map)

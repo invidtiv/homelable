@@ -10,6 +10,7 @@ import { Dialog, DialogContent, DialogHeader, DialogTitle } from '@/components/u
 import { Button } from '@/components/ui/button'
 import { useThemeStore } from '@/stores/themeStore'
 import { useCanvasStore } from '@/stores/canvasStore'
+import { clampHandles, sideDefault } from '@/utils/handleUtils'
 import { THEMES } from '@/utils/themes'
 import { applyOpacity } from '@/utils/colorUtils'
 import type {
@@ -175,6 +176,33 @@ function NodeEditor({ nodeType, style, onChange, onApplyToExisting }: NodeEditor
               className="w-20 h-7 text-xs bg-[#0d1117] border border-[#30363d] rounded px-2 text-[#e6edf3]"
             />
           </div>
+        </div>
+      </div>
+
+      <div className="border-t border-[#30363d] pt-3">
+        <div className="text-xs text-[#8b949e] mb-1">Default connection points</div>
+        <div className="text-xs text-[#8b949e]/60 mb-2">New {NODE_TYPE_LABELS[nodeType]} nodes start with these (0–64 per side)</div>
+        <div className="grid grid-cols-2 gap-2">
+          {([
+            ['Top', 'top', 'topHandles'],
+            ['Right', 'right', 'rightHandles'],
+            ['Bottom', 'bottom', 'bottomHandles'],
+            ['Left', 'left', 'leftHandles'],
+          ] as const).map(([label, side, key]) => (
+            <div key={side} className="flex items-center gap-2">
+              <span className="text-xs text-[#8b949e] w-12">{label}</span>
+              <input
+                type="number"
+                min={sideDefault(side)}
+                max={64}
+                step={1}
+                value={style[key] ?? sideDefault(side)}
+                onChange={(e) => set(key, clampHandles(side, parseInt(e.target.value, 10)))}
+                aria-label={`${label} default connection points`}
+                className="w-16 h-7 text-xs bg-[#0d1117] border border-[#30363d] rounded px-2 text-[#e6edf3]"
+              />
+            </div>
+          ))}
         </div>
       </div>
 

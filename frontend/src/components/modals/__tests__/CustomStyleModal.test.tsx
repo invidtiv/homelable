@@ -135,6 +135,34 @@ describe('CustomStyleModal', () => {
     expect((widthInputs[0] as HTMLInputElement).value).toBe('250')
   })
 
+  it('shows per-side default connection-point inputs in the node editor', () => {
+    render(<CustomStyleModal open onClose={vi.fn()} />)
+    fireEvent.click(screen.getByRole('button', { name: 'Router' }))
+    expect(screen.getByText('Default connection points')).toBeDefined()
+    expect(screen.getByLabelText('Top default connection points')).toBeDefined()
+    expect(screen.getByLabelText('Left default connection points')).toBeDefined()
+  })
+
+  it('defaults per-side inputs to 1 (top/bottom) and 0 (left/right)', () => {
+    render(<CustomStyleModal open onClose={vi.fn()} />)
+    fireEvent.click(screen.getByRole('button', { name: 'Router' }))
+    expect((screen.getByLabelText('Top default connection points') as HTMLInputElement).value).toBe('1')
+    expect((screen.getByLabelText('Left default connection points') as HTMLInputElement).value).toBe('0')
+  })
+
+  it('editing a per-side default persists via setCustomStyle on Save', () => {
+    const onClose = vi.fn()
+    useCanvasStore.setState({ markUnsaved: vi.fn() })
+    const setCustomStyle = vi.spyOn(useThemeStore.getState(), 'setCustomStyle')
+    render(<CustomStyleModal open onClose={onClose} />)
+    fireEvent.click(screen.getByRole('button', { name: 'Router' }))
+    fireEvent.change(screen.getByLabelText('Left default connection points'), { target: { value: '3' } })
+    fireEvent.click(screen.getByRole('button', { name: 'Save Custom Style' }))
+    expect(setCustomStyle).toHaveBeenCalled()
+    const saved = setCustomStyle.mock.calls.at(-1)?.[0]
+    expect(saved?.nodes.router?.leftHandles).toBe(3)
+  })
+
   it('resets abandoned edits when reopened after cancel (mounted parent)', () => {
     // Parent keeps the modal mounted and only toggles `open`, so the reset must
     // happen on the open-prop edge, not via Radix onOpenChange.

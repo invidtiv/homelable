@@ -1,6 +1,6 @@
 import type { Node, Edge } from '@xyflow/react'
 import type { NodeData, EdgeData, Waypoint } from '@/types'
-import { normalizeHandle, clampBottomHandles } from '@/utils/handleUtils'
+import { normalizeHandle, clampHandles } from '@/utils/handleUtils'
 
 // ── Types ────────────────────────────────────────────────────────────────────
 
@@ -31,7 +31,10 @@ export interface ApiNode extends Record<string, unknown> {
   properties?: unknown[] | null
   width?: number | null
   height?: number | null
+  top_handles?: number
   bottom_handles?: number
+  left_handles?: number
+  right_handles?: number
   show_port_numbers?: boolean
 }
 
@@ -117,7 +120,10 @@ export function serializeNode(n: Node<NodeData>): Record<string, unknown> {
     // fractional content-fit value.
     width: n.width ?? n.measured?.width ?? null,
     height: n.height ?? n.measured?.height ?? null,
-    bottom_handles: clampBottomHandles(n.data.bottom_handles ?? 1),
+    top_handles: clampHandles('top', n.data.top_handles ?? 1),
+    bottom_handles: clampHandles('bottom', n.data.bottom_handles ?? 1),
+    left_handles: clampHandles('left', n.data.left_handles ?? 0),
+    right_handles: clampHandles('right', n.data.right_handles ?? 0),
     show_port_numbers: n.data.show_port_numbers ?? false,
     pos_x: n.position.x,
     pos_y: n.position.y,
@@ -178,7 +184,10 @@ export function deserializeApiNode(
     data: {
       ...n,
       type: normalizedType,
-      bottom_handles: clampBottomHandles(n.bottom_handles ?? 1),
+      top_handles: clampHandles('top', n.top_handles ?? 1),
+      bottom_handles: clampHandles('bottom', n.bottom_handles ?? 1),
+      left_handles: clampHandles('left', n.left_handles ?? 0),
+      right_handles: clampHandles('right', n.right_handles ?? 0),
       collapsed: Boolean(n.custom_colors?.collapsed),
     } as unknown as NodeData,
     ...(n.parent_id && parentIsContainer ? { parentId: n.parent_id, extent: 'parent' as const } : {}),
