@@ -153,6 +153,18 @@ describe('PendingDevicesModal', () => {
     expect(screen.getByText('Z-WAVE')).toBeInTheDocument()
   })
 
+  it('colours the role badge with the node-type accent, not flat grey', async () => {
+    mockPending.mockResolvedValue({ data: [DEVICE_ZWAVE] })
+    render(<PendingDevicesModal {...baseProps} />)
+    const card = await waitFor(() => screen.getByTestId('pending-card-dev-c'))
+    // zwave_router accent from the default theme = #e3b341 (amber), applied to
+    // both the text colour and a translucent background.
+    const badge = within(card).getByText('zwave_router')
+    // #e3b341 → rgb(227, 179, 65) once jsdom normalises the inline colour.
+    expect(badge).toHaveStyle({ color: 'rgb(227, 179, 65)' })
+    expect(badge.className).not.toContain('text-muted-foreground')
+  })
+
   it('filters by source (zwave only)', async () => {
     mockPending.mockResolvedValue({ data: [DEVICE_IP, DEVICE_ZWAVE] })
     render(<PendingDevicesModal {...baseProps} />)

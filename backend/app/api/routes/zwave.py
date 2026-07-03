@@ -11,7 +11,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.api.deps import get_current_user
 from app.db.database import AsyncSessionLocal, get_db
-from app.db.models import Design, Node, PendingDevice, PendingDeviceLink, ScanRun
+from app.db.models import Node, PendingDevice, PendingDeviceLink, ScanRun
 from app.schemas.scan import ScanRunResponse
 from app.schemas.zwave import (
     ZwaveCoordinatorOut,
@@ -23,6 +23,7 @@ from app.schemas.zwave import (
     ZwaveTestConnectionRequest,
     ZwaveTestConnectionResponse,
 )
+from app.services.node_dedupe import dedupe_nodes_by_ieee
 from app.services.zwave_service import (
     build_zwave_properties,
     fetch_zwave_network,
@@ -134,9 +135,12 @@ async def _persist_pending_import(
     Coordinator auto-approves to a canvas Node. Other devices upsert by Z-Wave
     identity. All zwave-source links are wiped and re-inserted from the new map.
     """
-    first_design = (await db.execute(select(Design).order_by(Design.created_at).limit(1))).scalar()
-    default_design_id = first_design.id if first_design else None
+    # Repair any pre-existing same-canvas duplicate nodes before upserting, so
+    # the by-IEEE lookups below resolve cleanly.
+    await dedupe_nodes_by_ieee(db)
 
+    # Coordinator is no longer auto-placed, so the response's coordinator fields
+    # stay unset — retained for backward-compatible response shape.
     coordinator_out: ZwaveCoordinatorOut | None = None
     coordinator_existed = False
     pending_created = 0
@@ -148,47 +152,56 @@ async def _persist_pending_import(
             continue
         props = build_zwave_properties(ieee, n.get("vendor"), n.get("model"))
 
-        if n.get("type") == "zwave_coordinator":
-            existing = await db.execute(select(Node).where(Node.ieee_address == ieee))
-            existing_node = existing.scalar_one_or_none()
-            if existing_node:
+        # The coordinator is no longer auto-placed on the canvas — it flows to
+        # the pending inventory like every other device, so the user approves it
+        # explicitly. Only the shared paths below run for it.
+
+        # Already approved as a canvas Node → refresh props on every canvas it
+        # sits on. Still ensure the discovery inventory carries a row for it
+        # (status="approved") so it shows in the inventory list with an
+        # "In N canvas" badge — legacy auto-placed coordinators never got a
+        # pending row, which is why they went missing.
+        existing_nodes = (
+            await db.execute(
+                select(Node).where(Node.ieee_address == ieee).order_by(Node.id)
+            )
+        ).scalars().all()
+        if existing_nodes:
+            for existing_node in existing_nodes:
                 existing_node.properties = merge_zwave_properties(
                     existing_node.properties, props
                 )
-                coordinator_out = ZwaveCoordinatorOut(
-                    id=existing_node.id,
-                    label=existing_node.label,
-                    ieee_address=ieee,
+            inv = (
+                await db.execute(
+                    select(PendingDevice).where(PendingDevice.ieee_address == ieee)
                 )
-                coordinator_existed = True
-                continue
-            label = n.get("friendly_name") or ieee
-            node = Node(
-                label=label,
-                type=n.get("type") or "zwave_coordinator",
-                status="online",
-                check_method="none",
-                ieee_address=ieee,
-                services=[],
-                properties=props,
-                design_id=default_design_id,
-            )
-            db.add(node)
-            await db.flush()
-            coordinator_out = ZwaveCoordinatorOut(
-                id=node.id, label=label, ieee_address=ieee
-            )
-            continue
-
-        # Already approved as a canvas Node → refresh props, skip pending row.
-        existing_node_q = await db.execute(
-            select(Node).where(Node.ieee_address == ieee)
-        )
-        existing_node = existing_node_q.scalar_one_or_none()
-        if existing_node:
-            existing_node.properties = merge_zwave_properties(
-                existing_node.properties, props
-            )
+            ).scalar_one_or_none()
+            if inv is None:
+                db.add(
+                    PendingDevice(
+                        ieee_address=ieee,
+                        friendly_name=n.get("friendly_name"),
+                        hostname=n.get("friendly_name"),
+                        suggested_type=n.get("type"),
+                        device_subtype=n.get("device_type"),
+                        model=n.get("model"),
+                        vendor=n.get("vendor"),
+                        lqi=n.get("lqi"),
+                        status="approved",
+                        discovery_source="zwave",
+                    )
+                )
+                pending_created += 1
+            else:
+                # Refresh metadata but never change the row's status.
+                inv.friendly_name = n.get("friendly_name") or inv.friendly_name
+                inv.suggested_type = n.get("type") or inv.suggested_type
+                inv.device_subtype = n.get("device_type") or inv.device_subtype
+                inv.model = n.get("model") or inv.model
+                inv.vendor = n.get("vendor") or inv.vendor
+                if n.get("lqi") is not None:
+                    inv.lqi = n.get("lqi")
+                pending_updated += 1
             continue
 
         result = await db.execute(

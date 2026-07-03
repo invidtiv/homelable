@@ -338,19 +338,35 @@ async def test_import_pending_endpoint_creates_zigbee_scan_run(
 
 
 @pytest.mark.asyncio
-async def test_persist_pending_import_creates_coordinator_and_pending(
+async def test_persist_pending_import_coordinator_goes_to_pending(
     db_session,
 ) -> None:
+    """Coordinator is no longer auto-placed — it lands in pending like the rest."""
+    from sqlalchemy import select
+
     from app.api.routes.zigbee import _persist_pending_import
+    from app.db.models import Node, PendingDevice
 
     result = await _persist_pending_import(db_session, _PENDING_NODES, _PENDING_EDGES)
     assert result.device_count == 3
-    assert result.pending_created == 2
+    assert result.pending_created == 3          # coordinator included now
     assert result.pending_updated == 0
-    assert result.coordinator is not None
-    assert result.coordinator.ieee_address == "0xCOORD"
+    assert result.coordinator is None           # not auto-placed
     assert result.coordinator_already_existed is False
     assert result.links_recorded == 2
+
+    # No canvas Node auto-created for the coordinator.
+    nodes = (await db_session.execute(select(Node))).scalars().all()
+    assert nodes == []
+    # Coordinator sits in the pending inventory.
+    coord = (
+        await db_session.execute(
+            select(PendingDevice).where(PendingDevice.ieee_address == "0xCOORD")
+        )
+    ).scalar_one()
+    assert coord.status == "pending"
+    assert coord.suggested_type == "zigbee_coordinator"
+    assert coord.device_subtype == "Coordinator"
 
 
 @pytest.mark.asyncio
@@ -366,8 +382,8 @@ async def test_persist_pending_import_idempotent_updates_existing(
     result = await _persist_pending_import(db_session, bumped, _PENDING_EDGES)
 
     assert result.pending_created == 0
-    assert result.pending_updated == 2
-    assert result.coordinator_already_existed is True
+    assert result.pending_updated == 3          # coordinator upserts too
+    assert result.coordinator_already_existed is False
     assert result.links_recorded == 2
 
 
@@ -389,12 +405,12 @@ async def test_persist_pending_import_replaces_links(db_session) -> None:
 
 
 @pytest.mark.asyncio
-async def test_persist_pending_import_sets_coordinator_properties(db_session) -> None:
-    """Coordinator Node is created with IEEE/Vendor/Model/LQI in properties."""
+async def test_persist_pending_import_sets_coordinator_pending_fields(db_session) -> None:
+    """Coordinator lands in pending carrying its vendor/model metadata."""
     from sqlalchemy import select
 
     from app.api.routes.zigbee import _persist_pending_import
-    from app.db.models import Node
+    from app.db.models import PendingDevice
 
     nodes_with_meta = [dict(n) for n in _PENDING_NODES]
     nodes_with_meta[0]["vendor"] = "TI"
@@ -403,28 +419,30 @@ async def test_persist_pending_import_sets_coordinator_properties(db_session) ->
     await _persist_pending_import(db_session, nodes_with_meta, _PENDING_EDGES)
 
     coord = (
-        await db_session.execute(select(Node).where(Node.ieee_address == "0xCOORD"))
+        await db_session.execute(
+            select(PendingDevice).where(PendingDevice.ieee_address == "0xCOORD")
+        )
     ).scalar_one()
-    keys = {p["key"]: p["value"] for p in coord.properties}
-    assert keys == {"IEEE": "0xCOORD", "Vendor": "TI", "Model": "CC2652"}
-    # New zigbee props default to hidden — user opts in from the right panel.
-    assert all(p["visible"] is False for p in coord.properties)
+    assert coord.vendor == "TI"
+    assert coord.model == "CC2652"
+    assert coord.suggested_type == "zigbee_coordinator"
 
 
 @pytest.mark.asyncio
-async def test_persist_pending_import_skips_pending_for_approved_node(
+async def test_persist_pending_import_backfills_inventory_for_approved_node(
     db_session,
 ) -> None:
-    """A device already approved as a canvas Node must not reappear in pending.
-
-    Its properties must still be refreshed with the latest Vendor/Model/LQI.
+    """A device on canvas but missing its inventory row gets one backfilled
+    (status="approved"), so it shows in the inventory list. Node props still
+    refresh with the latest Vendor/Model/LQI.
     """
     from sqlalchemy import select
 
     from app.api.routes.zigbee import _persist_pending_import
     from app.db.models import Node, PendingDevice
 
-    # Simulate: router was approved earlier → exists as a canvas Node.
+    # Simulate: router was approved earlier → exists as a canvas Node, but with
+    # no matching pending_devices row (e.g. a legacy auto-placed device).
     approved = Node(
         label="router_1",
         type="zigbee_router",
@@ -441,13 +459,15 @@ async def test_persist_pending_import_skips_pending_for_approved_node(
     bumped[1]["lqi"] = 250  # new LQI from re-import
     await _persist_pending_import(db_session, bumped, _PENDING_EDGES)
 
-    # No PendingDevice row was created for the approved router.
-    pendings = (
+    # An inventory row is backfilled as "approved" (it is on a canvas).
+    inv = (
         await db_session.execute(
             select(PendingDevice).where(PendingDevice.ieee_address == "0xR1")
         )
-    ).scalars().all()
-    assert pendings == []
+    ).scalar_one()
+    assert inv.status == "approved"
+    assert inv.suggested_type == "zigbee_router"
+    assert inv.device_subtype == "Router"
 
     # Node properties got refreshed.
     refreshed = (
@@ -457,6 +477,37 @@ async def test_persist_pending_import_skips_pending_for_approved_node(
     assert keys == {"IEEE": "0xR1", "Vendor": "TI", "Model": "CC2530", "LQI": "250"}
     # Brand-new props on an existing Node start hidden.
     assert all(p["visible"] is False for p in refreshed.properties)
+
+
+@pytest.mark.asyncio
+async def test_persist_pending_import_preserves_hidden_inventory_for_approved_node(
+    db_session,
+) -> None:
+    """If the on-canvas device already has a hidden inventory row, re-import
+    refreshes its metadata but must NOT flip it back to approved/visible."""
+    from sqlalchemy import select
+
+    from app.api.routes.zigbee import _persist_pending_import
+    from app.db.models import Node, PendingDevice
+
+    db_session.add(Node(
+        label="router_1", type="zigbee_router", status="online",
+        check_method="none", ieee_address="0xR1", services=[], properties=[],
+    ))
+    db_session.add(PendingDevice(
+        ieee_address="0xR1", friendly_name="router_1", suggested_type="zigbee_router",
+        device_subtype="Router", status="hidden", discovery_source="zigbee",
+    ))
+    await db_session.commit()
+
+    await _persist_pending_import(db_session, _PENDING_NODES, _PENDING_EDGES)
+
+    inv = (
+        await db_session.execute(
+            select(PendingDevice).where(PendingDevice.ieee_address == "0xR1")
+        )
+    ).scalar_one()
+    assert inv.status == "hidden"  # stays hidden
 
 
 @pytest.mark.asyncio
@@ -501,8 +552,8 @@ async def test_persist_pending_import_revives_orphaned_approved_device(
         )
     ).scalar_one()
     assert revived.status == "pending"
-    # End device 0xE1 is brand new → created as pending; router was updated.
-    assert result.pending_created == 1
+    # Coordinator + end device 0xE1 are brand new → created; router was revived.
+    assert result.pending_created == 2
     assert result.pending_updated == 1
 
     # It is now visible to the Pending list (status filter == "pending").
@@ -511,7 +562,7 @@ async def test_persist_pending_import_revives_orphaned_approved_device(
             select(PendingDevice).where(PendingDevice.status == "pending")
         )
     ).scalars().all()
-    assert {p.ieee_address for p in listed} == {"0xR1", "0xE1"}
+    assert {p.ieee_address for p in listed} == {"0xCOORD", "0xR1", "0xE1"}
 
 
 @pytest.mark.asyncio
@@ -591,15 +642,23 @@ async def test_persist_pending_import_preserves_user_visibility(db_session) -> N
 
 
 @pytest.mark.asyncio
-async def test_persist_pending_import_refreshes_existing_coordinator_properties(
+async def test_persist_pending_import_refreshes_approved_coordinator_node(
     db_session,
 ) -> None:
+    """An already-approved coordinator Node gets its props refreshed on
+    re-import, and a backfilled inventory row (approved) so it shows in the
+    inventory list — this is the legacy auto-placed coordinator scenario."""
     from sqlalchemy import select
 
     from app.api.routes.zigbee import _persist_pending_import
-    from app.db.models import Node
+    from app.db.models import Node, PendingDevice
 
-    await _persist_pending_import(db_session, _PENDING_NODES, _PENDING_EDGES)
+    # Legacy: coordinator auto-placed as a canvas Node, no pending_devices row.
+    db_session.add(Node(
+        label="Coordinator", type="zigbee_coordinator", status="online",
+        check_method="none", ieee_address="0xCOORD", services=[], properties=[],
+    ))
+    await db_session.commit()
 
     bumped = [dict(n) for n in _PENDING_NODES]
     bumped[0]["vendor"] = "TI"
@@ -612,10 +671,53 @@ async def test_persist_pending_import_refreshes_existing_coordinator_properties(
     keys = {p["key"]: p["value"] for p in coord.properties}
     assert keys["Vendor"] == "TI"
     assert keys["Model"] == "CC2652"
-    # Newly added keys on re-import default to hidden.
     by_key = {p["key"]: p for p in coord.properties}
     assert by_key["Vendor"]["visible"] is False
-    assert by_key["Model"]["visible"] is False
+    # Inventory row backfilled as approved → now visible in the inventory list.
+    inv = (
+        await db_session.execute(
+            select(PendingDevice).where(PendingDevice.ieee_address == "0xCOORD")
+        )
+    ).scalar_one()
+    assert inv.status == "approved"
+    assert inv.suggested_type == "zigbee_coordinator"
+
+
+@pytest.mark.asyncio
+async def test_persist_pending_import_device_on_multiple_canvases(
+    db_session,
+) -> None:
+    """Regression: a device approved onto TWO designs (one Node each) must not
+    crash re-import with MultipleResultsFound — props refresh on both nodes."""
+    from sqlalchemy import select
+
+    from app.api.routes.zigbee import _persist_pending_import
+    from app.db.models import Design, Node
+
+    d1 = Design(name="d1")
+    d2 = Design(name="d2")
+    db_session.add_all([d1, d2])
+    await db_session.flush()
+    for d in (d1, d2):
+        db_session.add(Node(
+            label="router_1", type="zigbee_router", status="online",
+            check_method="none", ieee_address="0xR1", services=[],
+            properties=[], design_id=d.id,
+        ))
+    await db_session.commit()
+
+    bumped = [dict(n) for n in _PENDING_NODES]
+    bumped[1]["lqi"] = 240
+    # Must not raise.
+    await _persist_pending_import(db_session, bumped, _PENDING_EDGES)
+
+    nodes = (
+        await db_session.execute(select(Node).where(Node.ieee_address == "0xR1"))
+    ).scalars().all()
+    assert len(nodes) == 2  # both canvas placements preserved
+    for n in nodes:
+        lqi = {p["key"]: p["value"] for p in n.properties}.get("LQI")
+        assert lqi == "240"  # refreshed on every canvas
 
 
 @pytest.mark.asyncio

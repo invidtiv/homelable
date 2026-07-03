@@ -297,17 +297,30 @@ async def test_import_pending_requires_auth(client: AsyncClient) -> None:
 
 
 @pytest.mark.asyncio
-async def test_persist_creates_coordinator_and_pending(db_session) -> None:
+async def test_persist_coordinator_goes_to_pending(db_session) -> None:
+    """Coordinator is no longer auto-placed — it lands in pending like the rest."""
+    from sqlalchemy import select
+
     from app.api.routes.zwave import _persist_pending_import
+    from app.db.models import Node, PendingDevice
 
     result = await _persist_pending_import(db_session, _PENDING_NODES, _PENDING_EDGES)
     assert result.device_count == 3
-    assert result.pending_created == 2
+    assert result.pending_created == 3          # coordinator included now
     assert result.pending_updated == 0
-    assert result.coordinator is not None
-    assert result.coordinator.ieee_address == "zwave-0xh-1"
+    assert result.coordinator is None           # not auto-placed
     assert result.coordinator_already_existed is False
     assert result.links_recorded == 2
+
+    nodes = (await db_session.execute(select(Node))).scalars().all()
+    assert nodes == []
+    coord = (
+        await db_session.execute(
+            select(PendingDevice).where(PendingDevice.ieee_address == "zwave-0xh-1")
+        )
+    ).scalar_one()
+    assert coord.status == "pending"
+    assert coord.suggested_type == "zwave_coordinator"
 
 
 @pytest.mark.asyncio
@@ -319,8 +332,8 @@ async def test_persist_idempotent_updates_existing(db_session) -> None:
     bumped[1]["model"] = "ZW111"
     result = await _persist_pending_import(db_session, bumped, _PENDING_EDGES)
     assert result.pending_created == 0
-    assert result.pending_updated == 2
-    assert result.coordinator_already_existed is True
+    assert result.pending_updated == 3          # coordinator upserts too
+    assert result.coordinator_already_existed is False
 
 
 @pytest.mark.asyncio
@@ -339,26 +352,31 @@ async def test_persist_replaces_links(db_session) -> None:
 
 
 @pytest.mark.asyncio
-async def test_persist_sets_coordinator_properties(db_session) -> None:
+async def test_persist_sets_coordinator_pending_fields(db_session) -> None:
+    """Coordinator lands in pending carrying its vendor/model metadata."""
     from sqlalchemy import select
 
     from app.api.routes.zwave import _persist_pending_import
-    from app.db.models import Node
+    from app.db.models import PendingDevice
 
     nodes = [dict(n) for n in _PENDING_NODES]
     nodes[0]["vendor"] = "Aeotec"
     nodes[0]["model"] = "ZW090"
     await _persist_pending_import(db_session, nodes, _PENDING_EDGES)
     coord = (
-        await db_session.execute(select(Node).where(Node.ieee_address == "zwave-0xh-1"))
+        await db_session.execute(
+            select(PendingDevice).where(PendingDevice.ieee_address == "zwave-0xh-1")
+        )
     ).scalar_one()
-    keys = {p["key"]: p["value"] for p in coord.properties}
-    assert keys == {"Z-Wave ID": "zwave-0xh-1", "Vendor": "Aeotec", "Model": "ZW090"}
-    assert all(p["visible"] is False for p in coord.properties)
+    assert coord.vendor == "Aeotec"
+    assert coord.model == "ZW090"
+    assert coord.suggested_type == "zwave_coordinator"
 
 
 @pytest.mark.asyncio
-async def test_persist_skips_pending_for_approved_node(db_session) -> None:
+async def test_persist_backfills_inventory_for_approved_node(db_session) -> None:
+    """On-canvas device missing its inventory row gets one backfilled
+    (status="approved"); Node props still refresh."""
     from sqlalchemy import select
 
     from app.api.routes.zwave import _persist_pending_import
@@ -378,12 +396,13 @@ async def test_persist_skips_pending_for_approved_node(db_session) -> None:
 
     await _persist_pending_import(db_session, _PENDING_NODES, _PENDING_EDGES)
 
-    pendings = (
+    inv = (
         await db_session.execute(
             select(PendingDevice).where(PendingDevice.ieee_address == "zwave-0xh-2")
         )
-    ).scalars().all()
-    assert pendings == []
+    ).scalar_one()
+    assert inv.status == "approved"
+    assert inv.suggested_type == "zwave_router"
     refreshed = (
         await db_session.execute(select(Node).where(Node.ieee_address == "zwave-0xh-2"))
     ).scalar_one()
@@ -416,7 +435,8 @@ async def test_persist_revives_orphaned_approved_device(db_session) -> None:
         )
     ).scalar_one()
     assert revived.status == "pending"
-    assert result.pending_created == 1
+    # Coordinator + end device are brand new → created; router was revived.
+    assert result.pending_created == 2
     assert result.pending_updated == 1
 
 
@@ -445,3 +465,38 @@ async def test_persist_keeps_hidden_hidden(db_session) -> None:
         )
     ).scalar_one()
     assert still_hidden.status == "hidden"
+
+
+@pytest.mark.asyncio
+async def test_persist_device_on_multiple_canvases(db_session) -> None:
+    """Regression: a device on TWO designs (one Node each) must not crash
+    re-import with MultipleResultsFound — props refresh on both nodes."""
+    from sqlalchemy import select
+
+    from app.api.routes.zwave import _persist_pending_import
+    from app.db.models import Design, Node
+
+    d1 = Design(name="d1")
+    d2 = Design(name="d2")
+    db_session.add_all([d1, d2])
+    await db_session.flush()
+    for d in (d1, d2):
+        db_session.add(Node(
+            label="Wall Plug", type="zwave_router", status="online",
+            check_method="none", ieee_address="zwave-0xh-2", services=[],
+            properties=[], design_id=d.id,
+        ))
+    await db_session.commit()
+
+    bumped = [dict(n) for n in _PENDING_NODES]
+    bumped[1]["model"] = "ZW200"
+    # Must not raise.
+    await _persist_pending_import(db_session, bumped, _PENDING_EDGES)
+
+    nodes = (
+        await db_session.execute(select(Node).where(Node.ieee_address == "zwave-0xh-2"))
+    ).scalars().all()
+    assert len(nodes) == 2  # both canvas placements preserved
+    for n in nodes:
+        model = {p["key"]: p["value"] for p in n.properties}.get("Model")
+        assert model == "ZW200"  # refreshed on every canvas
