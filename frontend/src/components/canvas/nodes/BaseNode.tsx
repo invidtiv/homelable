@@ -56,7 +56,7 @@ export function BaseNode({ id, data, selected, icon: typeIcon, width, height }: 
 
   return (
     <div
-      className="relative flex flex-col rounded-lg border transition-all duration-200"
+      className="relative flex flex-col rounded-lg border transition-all duration-200 overflow-hidden"
       style={{
         background: colors.background,
         borderColor: colors.border,
