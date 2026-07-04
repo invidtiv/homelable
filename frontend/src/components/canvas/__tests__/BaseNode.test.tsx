@@ -119,6 +119,14 @@ describe('BaseNode — borderWidth zoom scaling', () => {
     expect((container.firstChild as HTMLElement).style.borderWidth).toBe('1px')
   })
 
+  // Regression: the node root must NOT clip its own bounds, otherwise the outer
+  // half of each connection handle (which sits centred on the edge) becomes
+  // non-interactive and the "magnet" snap area is halved.
+  it('root does not clip overflow (keeps handles grabbable)', () => {
+    const { container } = renderBaseNode({})
+    expect((container.firstChild as HTMLElement).className).not.toContain('overflow-hidden')
+  })
+
   it('boxShadow glow ring uses borderWidth when selected + online at zoom=0.5', () => {
     mockZoom = 0.5
     const node = makeNode({ status: 'online' })

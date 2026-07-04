@@ -192,6 +192,7 @@ export function CanvasContainer({ onConnect: onConnectProp, onEdgeDoubleClick, o
         colorMode={theme.colors.reactFlowColorMode}
         elevateNodesOnSelect={false}
         connectionMode={ConnectionMode.Loose}
+        connectionRadius={30}
         isValidConnection={isValidConnection}
       >
         <Background
