@@ -105,6 +105,21 @@ describe('NodeModal', () => {
     confirmSpy.mockRestore()
   })
 
+  // ── Custom-style shortcut ─────────────────────────────────────────────
+
+  it('shows the type-style shortcut and calls onEditTypeStyle with the node type', () => {
+    const onEditTypeStyle = vi.fn()
+    renderModal({ initial: BASE, onEditTypeStyle })
+    const link = screen.getByRole('button', { name: /style for all nodes on the canvas/i })
+    fireEvent.click(link)
+    expect(onEditTypeStyle).toHaveBeenCalledWith('server')
+  })
+
+  it('omits the shortcut when onEditTypeStyle is not provided', () => {
+    renderModal({ initial: BASE })
+    expect(screen.queryByText(/style for all nodes on the canvas/i)).toBeNull()
+  })
+
   // ── Label validation ──────────────────────────────────────────────────
 
   it('blocks submit and shows error when label is empty', () => {

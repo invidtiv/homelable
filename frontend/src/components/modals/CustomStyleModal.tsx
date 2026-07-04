@@ -300,9 +300,11 @@ type Selection = { kind: 'node'; type: NodeType } | { kind: 'edge'; type: EdgeTy
 interface CustomStyleModalProps {
   open: boolean
   onClose: () => void
+  /** When opening, preselect this node type's editor (shortcut from NodeModal). */
+  initialNodeType?: NodeType
 }
 
-export function CustomStyleModal({ open, onClose }: CustomStyleModalProps) {
+export function CustomStyleModal({ open, onClose, initialNodeType }: CustomStyleModalProps) {
   const { customStyle, setCustomStyle } = useThemeStore()
   const { markUnsaved, applyTypeNodeStyle, applyTypeEdgeStyle, applyAllCustomStyles } = useCanvasStore()
 
@@ -320,7 +322,12 @@ export function CustomStyleModal({ open, onClose }: CustomStyleModalProps) {
   useEffect(() => {
     if (open) {
       setDraft({ nodes: { ...customStyle.nodes }, edges: { ...customStyle.edges } })
-      setSelection(null)
+      if (initialNodeType) {
+        setTab('nodes')
+        setSelection({ kind: 'node', type: initialNodeType })
+      } else {
+        setSelection(null)
+      }
     }
     // Intentional snapshot-on-open: we don't want live customStyle changes to
     // clobber an in-progress edit, only a fresh open should reset.

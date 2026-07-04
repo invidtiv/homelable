@@ -1,6 +1,6 @@
 import { Fragment, createElement, useState } from 'react'
 import modalStyles from './modal-interactive.module.css'
-import { RotateCcw, ChevronDown } from 'lucide-react'
+import { RotateCcw, ChevronDown, Palette } from 'lucide-react'
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from '@/components/ui/dialog'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
@@ -132,11 +132,13 @@ interface NodeModalProps {
   title?: string
   parentCandidates?: ParentCandidate[]
   currentNodeId?: string
+  /** Shortcut: open the Custom Style editor for this node's type (canvas-wide). */
+  onEditTypeStyle?: (type: NodeType) => void
 }
 
 // NodeModal is always mounted with a key that changes on open/edit, so useState
 // initial value is enough - no need for a reset effect.
-export function NodeModal({ open, onClose, onSubmit, initial, title = 'Add Node', parentCandidates = [], currentNodeId }: NodeModalProps) {
+export function NodeModal({ open, onClose, onSubmit, initial, title = 'Add Node', parentCandidates = [], currentNodeId, onEditTypeStyle }: NodeModalProps) {
   const merged = { ...DEFAULT_DATA, ...initial }
   if (MESH_TYPES.includes((merged.type ?? '') as NodeType)) merged.check_method = 'none'
   const [form, setForm] = useState<Partial<NodeData>>(merged)
@@ -611,6 +613,15 @@ export function NodeModal({ open, onClose, onSubmit, initial, title = 'Add Node'
                   <p className="text-[10px] text-muted-foreground/50">Using default colors for {NODE_TYPE_LABELS[form.type ?? 'generic']}. Click a swatch to customize.</p>
                 )}
               </div>
+              {onEditTypeStyle && form.type !== 'group' && form.type !== 'groupRect' && (
+                <button
+                  type="button"
+                  onClick={() => onEditTypeStyle((form.type ?? 'generic') as NodeType)}
+                  className="flex items-center gap-1 self-start text-[10px] text-[#00d4ff] hover:underline"
+                >
+                  <Palette size={10} /> Edit {NODE_TYPE_LABELS[form.type ?? 'generic']} style for all nodes on the canvas
+                </button>
+              )}
             </div>
 
             {/* Connection points per side (not for group containers) */}

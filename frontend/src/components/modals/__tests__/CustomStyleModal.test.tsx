@@ -54,6 +54,13 @@ describe('CustomStyleModal', () => {
     expect(screen.getByText('Default size')).toBeDefined()
   })
 
+  it('initialNodeType preselects that type editor on open (NodeModal shortcut)', () => {
+    render(<CustomStyleModal open initialNodeType="switch" onClose={vi.fn()} />)
+    // Editor for Switch is shown immediately, no manual selection needed.
+    expect(screen.getByText(/Apply to existing Switch/)).toBeDefined()
+    expect(screen.queryByText(/Select a node type/)).toBeNull()
+  })
+
   it('selecting an edge type opens the edge editor with path style buttons', () => {
     render(<CustomStyleModal open onClose={vi.fn()} />)
     fireEvent.click(screen.getByRole('button', { name: 'Edges' }))

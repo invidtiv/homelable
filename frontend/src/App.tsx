@@ -28,6 +28,7 @@ import { ZwaveImportModal } from '@/components/zwave/ZwaveImportModal'
 import { GroupRectModal, type GroupRectFormData } from '@/components/modals/GroupRectModal'
 import { TextModal, type TextFormData } from '@/components/modals/TextModal'
 import { ThemeModal } from '@/components/modals/ThemeModal'
+import { CustomStyleModal } from '@/components/modals/CustomStyleModal'
 import { SearchModal } from '@/components/modals/SearchModal'
 import { PendingDevicesModal } from '@/components/modals/PendingDevicesModal'
 import { ScanHistoryModal } from '@/components/modals/ScanHistoryModal'
@@ -41,7 +42,7 @@ import { canvasApi, designsApi, liveviewApi } from '@/api/client'
 import * as standaloneStorage from '@/utils/standaloneStorage'
 import { demoNodes, demoEdges } from '@/utils/demoData'
 import { useStatusPolling } from '@/hooks/useStatusPolling'
-import type { NodeData, EdgeData, CustomStyleDef, FloorMapConfig } from '@/types'
+import type { NodeData, EdgeData, CustomStyleDef, FloorMapConfig, NodeType } from '@/types'
 import type { ZigbeeNode, ZigbeeEdge } from '@/components/zigbee/types'
 import type { ZwaveNode, ZwaveEdge } from '@/components/zwave/types'
 
@@ -57,6 +58,7 @@ export default function App() {
   useStatusPolling()
 
   const [themeModalOpen, setThemeModalOpen] = useState(false)
+  const [styleEditorType, setStyleEditorType] = useState<NodeType | null>(null)
   const [searchOpen, setSearchOpen] = useState(false)
   const [scanHistoryOpen, setScanHistoryOpen] = useState(false)
   const [pendingModalOpen, setPendingModalOpen] = useState(false)
@@ -755,6 +757,7 @@ export default function App() {
           onSubmit={handleAddNode}
           title="Add Node"
           parentCandidates={nodes.map((n) => ({ id: n.id, label: n.data.label ?? n.id, type: n.data.type, container_mode: n.data.container_mode }))}
+          onEditTypeStyle={setStyleEditorType}
         />
 
         {/* key forces re-mount when editing a different node, resetting form state */}
@@ -784,6 +787,7 @@ export default function App() {
               .map((n) => ({ id: n.id, label: n.data.label ?? n.id, type: n.data.type, container_mode: n.data.container_mode }))
           })()}
           currentNodeId={editNodeId ?? undefined}
+          onEditTypeStyle={setStyleEditorType}
         />
 
         <EdgeModal
@@ -914,6 +918,15 @@ export default function App() {
           key={themeModalOpen ? 'theme-open' : 'theme-closed'}
           open={themeModalOpen}
           onClose={() => setThemeModalOpen(false)}
+        />
+
+        {/* Standalone Custom Style editor, opened from a node's Appearance
+            shortcut with that node's type preselected. */}
+        <CustomStyleModal
+          key={styleEditorType ? `style-${styleEditorType}` : 'style-closed'}
+          open={styleEditorType !== null}
+          initialNodeType={styleEditorType ?? undefined}
+          onClose={() => setStyleEditorType(null)}
         />
 
         <SearchModal
