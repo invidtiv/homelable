@@ -82,6 +82,10 @@ async def init_db() -> None:
         with suppress(OperationalError):
             await conn.exec_driver_sql("ALTER TABLE edges ADD COLUMN animated BOOLEAN NOT NULL DEFAULT 0")
         with suppress(OperationalError):
+            await conn.exec_driver_sql("ALTER TABLE edges ADD COLUMN marker_start TEXT NOT NULL DEFAULT 'none'")
+        with suppress(OperationalError):
+            await conn.exec_driver_sql("ALTER TABLE edges ADD COLUMN marker_end TEXT NOT NULL DEFAULT 'none'")
+        with suppress(OperationalError):
             await conn.exec_driver_sql("ALTER TABLE nodes ADD COLUMN cpu_count INTEGER")
         with suppress(OperationalError):
             await conn.exec_driver_sql("ALTER TABLE nodes ADD COLUMN cpu_model TEXT")

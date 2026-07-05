@@ -124,6 +124,28 @@ describe('CustomStyleModal', () => {
     expect(markUnsaved).not.toHaveBeenCalled()
   })
 
+  it('edge editor exposes Start/End marker pickers defaulting to none', () => {
+    render(<CustomStyleModal open onClose={vi.fn()} />)
+    fireEvent.click(screen.getByRole('button', { name: 'Edges' }))
+    fireEvent.click(screen.getByRole('button', { name: /Ethernet/ }))
+    const startNone = screen.getByRole('button', { name: 'Start marker none' })
+    const endNone = screen.getByRole('button', { name: 'End marker none' })
+    expect(startNone.getAttribute('aria-pressed')).toBe('true')
+    expect(endNone.getAttribute('aria-pressed')).toBe('true')
+  })
+
+  it('picking an End shape feeds arrowEnd to applyTypeEdgeStyle', () => {
+    const applyTypeEdgeStyle = vi.fn()
+    useCanvasStore.setState({ applyTypeEdgeStyle })
+    render(<CustomStyleModal open onClose={vi.fn()} />)
+    fireEvent.click(screen.getByRole('button', { name: 'Edges' }))
+    fireEvent.click(screen.getByRole('button', { name: /Ethernet/ }))
+    fireEvent.click(screen.getByRole('button', { name: 'End marker diamond' }))
+    fireEvent.click(screen.getByRole('button', { name: /Apply to existing Ethernet/ }))
+    expect(applyTypeEdgeStyle.mock.calls[0][1].arrowEnd).toBe('diamond')
+    expect(applyTypeEdgeStyle.mock.calls[0][1].arrowStart).toBe('none')
+  })
+
   it('editing path style updates the edge draft', () => {
     render(<CustomStyleModal open onClose={vi.fn()} />)
     fireEvent.click(screen.getByRole('button', { name: 'Edges' }))

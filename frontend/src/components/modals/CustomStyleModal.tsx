@@ -17,6 +17,7 @@ import type {
   NodeType, EdgeType, NodeTypeStyle, EdgeTypeStyle, CustomStyleDef, EdgePathStyle,
 } from '@/types'
 import { NODE_TYPE_LABELS, EDGE_TYPE_LABELS } from '@/types'
+import { MarkerShapePicker } from './MarkerShapePicker'
 
 // ── Node types exposed for custom style, grouped by category (skip groupRect/group) ──
 
@@ -64,6 +65,8 @@ function defaultEdgeStyle(edgeType: EdgeType): EdgeTypeStyle {
     opacity: 1,
     pathStyle: 'bezier',
     animated: 'none',
+    arrowStart: 'none',
+    arrowEnd: 'none',
   }
 }
 
@@ -278,6 +281,14 @@ function EdgeEditor({ edgeType, style, onChange, onApplyToExisting }: EdgeEditor
             <option value="flow">Flow</option>
             <option value="snake">Snake</option>
           </select>
+        </div>
+
+        <div>
+          <div className="text-xs text-[#8b949e] mb-2">Endpoints</div>
+          <div className="flex flex-col gap-1.5">
+            <MarkerShapePicker label="Start" value={style.arrowStart} onChange={(s) => set('arrowStart', s)} />
+            <MarkerShapePicker label="End" value={style.arrowEnd} onChange={(s) => set('arrowEnd', s)} />
+          </div>
         </div>
       </div>
 
