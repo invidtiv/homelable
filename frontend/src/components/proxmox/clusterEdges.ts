@@ -9,9 +9,12 @@
  */
 import type { ProxmoxNode } from './types'
 
-/** Source/target handle IDs for a cluster link (see handleUtils.handleId). */
+/** Source/target handle IDs for a cluster link (see handleUtils.handleId).
+ * Both are the bare slot-0 side names — the canonical stored form. React Flow
+ * resolves a bare id to that side; a '-t' target id fails to resolve and falls
+ * back to the top handle (which is why the target must be 'left', not 'left-t'). */
 export const CLUSTER_SOURCE_HANDLE = 'right'
-export const CLUSTER_TARGET_HANDLE = 'left-t'
+export const CLUSTER_TARGET_HANDLE = 'left'
 
 export interface ClusterEdgeSpec {
   source: string

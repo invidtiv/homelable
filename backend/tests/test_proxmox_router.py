@@ -265,7 +265,9 @@ async def test_cluster_link_resolves_to_cluster_edge(db_session) -> None:
     edge = (await db_session.execute(select(Edge))).scalars().one()
     assert edge.type == "cluster"
     assert edge.source_handle == "right"
-    assert edge.target_handle == "left-t"
+    # Bare side name (canonical) so React Flow resolves it to the left side;
+    # a '-t' target would fall back to the top handle.
+    assert edge.target_handle == "left"
 
 
 @pytest.mark.asyncio

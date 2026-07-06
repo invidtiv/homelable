@@ -642,16 +642,20 @@ async def _resolve_pending_links_for_ieee(
         if edge_design_id is None:
             first = (await db.execute(select(Design).order_by(Design.created_at).limit(1))).scalar()
             edge_design_id = first.id if first else None
-        # Edge shape by link source:
+        # Edge shape by link source. Handle IDs are the *bare* slot-0 side names
+        # (the canonical stored form — the save path normalizes '<side>-t' → the
+        # bare source id, and React Flow resolves the bare id to that side). A
+        # '-t' target id does not resolve here and RF falls back to the top
+        # handle, so never emit one.
         #   proxmox         → 'virtual' host→guest, vertical (bottom → top)
         #   proxmox_cluster → 'cluster' host↔host, horizontal (right → left)
         #   anything else   → 'iot' mesh link, vertical
         if link.discovery_source == "proxmox":
-            edge_type, src_handle, tgt_handle = "virtual", "bottom", "top-t"
+            edge_type, src_handle, tgt_handle = "virtual", "bottom", "top"
         elif link.discovery_source == "proxmox_cluster":
-            edge_type, src_handle, tgt_handle = "cluster", "right", "left-t"
+            edge_type, src_handle, tgt_handle = "cluster", "right", "left"
         else:
-            edge_type, src_handle, tgt_handle = "iot", "bottom", "top-t"
+            edge_type, src_handle, tgt_handle = "iot", "bottom", "top"
         edge = Edge(
             source=src_id,
             target=tgt_id,
@@ -663,7 +667,16 @@ async def _resolve_pending_links_for_ieee(
         db.add(edge)
         await db.flush()
         existing_pairs.add((src_id, tgt_id))
-        created.append({"id": edge.id, "source": src_id, "target": tgt_id})
+        # Return the edge's type + handles so the client injects it faithfully
+        # (a cluster edge must keep its right→left handles, not the iot default).
+        created.append({
+            "id": edge.id,
+            "source": src_id,
+            "target": tgt_id,
+            "type": edge_type,
+            "source_handle": src_handle,
+            "target_handle": tgt_handle,
+        })
         await db.delete(link)
 
     return created

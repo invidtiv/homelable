@@ -12,6 +12,7 @@ import { resolveNodeColors } from '@/utils/nodeColors'
 import { toast } from 'sonner'
 import { PendingDeviceModal, type PendingDevice } from '@/components/modals/PendingDeviceModal'
 import type { NodeType, ServiceInfo } from '@/types'
+import { applyAutoEdges, type AutoEdge } from '@/utils/autoEdges'
 import { buildZigbeeProperties, isZigbeeType } from '@/utils/zigbeeProperties'
 import { buildZwaveProperties, isZwaveType } from '@/utils/zwaveProperties'
 import { buildMacProperty } from '@/utils/macProperty'
@@ -100,21 +101,10 @@ function deviceLabel(d: PendingDevice): string {
   return d.friendly_name ?? d.hostname ?? specialServiceName(d) ?? d.ip ?? d.ieee_address ?? 'device'
 }
 
-function injectAutoEdges(edges: { id: string; source: string; target: string }[] | undefined) {
+function injectAutoEdges(edges: AutoEdge[] | undefined) {
   if (!edges || edges.length === 0) return
   useCanvasStore.setState((state) => ({
-    edges: [
-      ...state.edges,
-      ...edges.map((e) => ({
-        id: e.id,
-        source: e.source,
-        target: e.target,
-        sourceHandle: 'bottom',
-        targetHandle: 'top-t',
-        type: 'iot',
-        data: { type: 'iot' as const },
-      })),
-    ],
+    ...applyAutoEdges(state.nodes, state.edges, edges),
     hasUnsavedChanges: true,
   }))
 }
