@@ -34,6 +34,7 @@ from app.schemas.proxmox import (
 from app.schemas.scan import ScanRunResponse
 from app.services.node_dedupe import dedupe_nodes_by_ieee
 from app.services.proxmox_service import (
+    build_proxmox_cluster_links,
     build_proxmox_properties,
     fetch_proxmox_inventory,
     merge_proxmox_properties,
@@ -42,6 +43,11 @@ from app.services.proxmox_service import (
 
 logger = logging.getLogger(__name__)
 router = APIRouter()
+
+# Discovery sources for the two proxmox link shapes. Host→guest links render as
+# 'virtual' edges; host↔host cluster links render as 'cluster' edges.
+_PROXMOX_GUEST_SOURCE = "proxmox"
+_PROXMOX_CLUSTER_SOURCE = "proxmox_cluster"
 
 
 def _resolve_credentials(payload: ProxmoxConnectionRequest) -> tuple[str, str]:
@@ -156,6 +162,7 @@ async def _background_proxmox_import(
                 run.status = "done"
                 run.devices_found = result.device_count
                 run.finished_at = datetime.now(timezone.utc)
+                run.error = _guest_visibility_advisory(nodes_raw)
                 await db.commit()
         except Exception as exc:
             logger.exception("Proxmox import %s failed", run_id)
@@ -166,6 +173,27 @@ async def _background_proxmox_import(
                 run.error = str(exc)[:500]
                 run.finished_at = datetime.now(timezone.utc)
                 await db.commit()
+
+
+def _guest_visibility_advisory(nodes_raw: list[dict[str, Any]]) -> str | None:
+    """Non-fatal advisory when hosts import but no VMs/LXC were visible.
+
+    A Proxmox API token that lacks ``VM.Audit`` sees empty ``qemu``/``lxc`` lists
+    (HTTP 200, no error), so only host nodes come through. The usual cause is a
+    privilege-separated token whose effective rights are the *intersection* with
+    the user's rights — granting PVEAuditor to the token alone is not enough when
+    the user has none. Surface that instead of a silent success.
+    """
+    hosts = sum(1 for n in nodes_raw if n.get("type") == "proxmox")
+    guests = len(nodes_raw) - hosts
+    if hosts and not guests:
+        return (
+            f"Imported {hosts} host(s) but no VMs or LXC were visible to the API "
+            "token. Grant the PVEAuditor role at path '/' to BOTH the token and "
+            "the user (privilege-separated tokens get the intersection of token "
+            "and user rights), then re-import."
+        )
+    return None
 
 
 async def _persist_pending_import(
@@ -183,6 +211,9 @@ async def _persist_pending_import(
     Update-in-place only. Nothing is ever deleted; hidden rows stay hidden.
     """
     await dedupe_nodes_by_ieee(db)
+
+    cluster_pairs = build_proxmox_cluster_links(nodes_raw)
+    cluster_members = {ieee for pair in cluster_pairs for ieee in pair}
 
     pending_created = 0
     pending_updated = 0
@@ -215,6 +246,11 @@ async def _persist_pending_import(
                 en.cpu_count = en.cpu_count or n.get("cpu_count")
                 en.ram_gb = en.ram_gb or n.get("ram_gb")
                 en.disk_gb = en.disk_gb or n.get("disk_gb")
+                # A cluster host needs one left + one right handle for the
+                # cluster edge endpoints (both default to 0).
+                if ieee in cluster_members:
+                    en.left_handles = max(en.left_handles or 0, 1)
+                    en.right_handles = max(en.right_handles or 0, 1)
             await _ensure_inventory_row(db, ieee, ip, n, props, approved=True)
             pending_updated += 1
             continue
@@ -228,7 +264,7 @@ async def _persist_pending_import(
             _refresh_pending(pending, ieee, ip, n, props)
             pending_updated += 1
 
-    links_recorded = await _replace_links(db, edges_raw)
+    links_recorded = await _replace_links(db, edges_raw, cluster_pairs)
     await db.commit()
 
     return ProxmoxImportPendingResponse(
@@ -309,27 +345,37 @@ async def _ensure_inventory_row(
         inv.properties = merge_proxmox_properties(list(inv.properties or []), props)
 
 
-async def _replace_links(db: AsyncSession, edges_raw: list[dict[str, Any]]) -> int:
-    """Wipe all proxmox-source links and re-insert the freshly discovered set."""
+async def _replace_links(
+    db: AsyncSession,
+    edges_raw: list[dict[str, Any]],
+    cluster_pairs: list[tuple[str, str]],
+) -> int:
+    """Wipe all proxmox-source links and re-insert the freshly discovered set.
+
+    Two link shapes: host→guest (``proxmox`` → 'virtual' edges) and host↔host
+    (``proxmox_cluster`` → 'cluster' edges).
+    """
     await db.execute(
-        sa_delete(PendingDeviceLink).where(PendingDeviceLink.discovery_source == "proxmox")
+        sa_delete(PendingDeviceLink).where(
+            PendingDeviceLink.discovery_source.in_([_PROXMOX_GUEST_SOURCE, _PROXMOX_CLUSTER_SOURCE])
+        )
     )
     recorded = 0
     seen: set[tuple[str, str]] = set()
-    for e in edges_raw:
-        src = e.get("source")
-        tgt = e.get("target")
+
+    def _add(src: str | None, tgt: str | None, source: str) -> None:
+        nonlocal recorded
         if not src or not tgt or (src, tgt) in seen:
-            continue
+            return
         seen.add((src, tgt))
-        db.add(
-            PendingDeviceLink(
-                source_ieee=src,
-                target_ieee=tgt,
-                discovery_source="proxmox",
-            )
-        )
+        db.add(PendingDeviceLink(source_ieee=src, target_ieee=tgt, discovery_source=source))
         recorded += 1
+
+    for e in edges_raw:
+        _add(e.get("source"), e.get("target"), _PROXMOX_GUEST_SOURCE)
+    for src, tgt in cluster_pairs:
+        _add(src, tgt, _PROXMOX_CLUSTER_SOURCE)
+
     return recorded
 
 

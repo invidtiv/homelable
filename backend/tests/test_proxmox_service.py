@@ -75,6 +75,25 @@ def test_parse_inventory_builds_host_guest_edges() -> None:
     assert edges == [{"source": "pve-node-pve1", "target": "pve-pve1-101"}]
 
 
+def test_build_cluster_links_chains_hosts() -> None:
+    nodes = [
+        svc._host_node({"node": "pve-a", "status": "online"}),
+        svc._guest_node({"vmid": 101, "status": "running"}, "pve-a", "qemu", None),
+        svc._host_node({"node": "pve-b", "status": "online"}),
+        svc._host_node({"node": "pve-c", "status": "online"}),
+    ]
+    pairs = svc.build_proxmox_cluster_links(nodes)
+    assert pairs == [("pve-node-pve-a", "pve-node-pve-b"), ("pve-node-pve-b", "pve-node-pve-c")]
+
+
+def test_build_cluster_links_single_host_is_not_a_cluster() -> None:
+    nodes = [svc._host_node({"node": "pve-a", "status": "online"})]
+    assert svc.build_proxmox_cluster_links(nodes) == []
+    # Guests alone never form a cluster.
+    guest = svc._guest_node({"vmid": 1, "status": "running"}, "pve-a", "qemu", None)
+    assert svc.build_proxmox_cluster_links([guest]) == []
+
+
 def test_sanitize_error_hides_credentials() -> None:
     exc = httpx.HTTPStatusError(
         "boom", request=httpx.Request("GET", "https://h/api2/json"),
@@ -115,9 +134,46 @@ async def test_fetch_inventory_happy_path() -> None:
 @pytest.mark.asyncio
 async def test_test_connection_returns_message() -> None:
     async def fake_get_json(client, path: str):
+        if path == "/access/permissions":
+            return {"/": {"VM.Audit": 1}}  # token has an ACL
         return {"version": "8.2.2"}
 
     with patch.object(svc, "_get_json", new=AsyncMock(side_effect=fake_get_json)):
         ok, msg = await svc.test_proxmox_connection("h", 8006, "u@pam!t", "sec")
     assert ok is True
     assert "8.2.2" in msg
+    assert "warning" not in msg.lower()
+
+
+@pytest.mark.asyncio
+async def test_test_connection_warns_when_token_has_no_permissions() -> None:
+    async def fake_get_json(client, path: str):
+        if path == "/access/permissions":
+            return {}  # privilege-separated token with no effective ACL
+        return {"version": "8.4.19"}
+
+    with patch.object(svc, "_get_json", new=AsyncMock(side_effect=fake_get_json)):
+        ok, msg = await svc.test_proxmox_connection("h", 8006, "u@pam!t", "sec")
+    # Auth still succeeds; the message flags the permission gap.
+    assert ok is True
+    assert "8.4.19" in msg
+    assert "PVEAuditor" in msg
+
+
+@pytest.mark.asyncio
+async def test_token_has_permissions_treats_empty_as_no_perms() -> None:
+    async def fake_get_json(client, path: str):
+        return {}
+
+    with patch.object(svc, "_get_json", new=AsyncMock(side_effect=fake_get_json)):
+        assert await svc._token_has_permissions(object()) is False
+
+
+@pytest.mark.asyncio
+async def test_token_has_permissions_assumes_ok_on_error() -> None:
+    async def boom(client, path: str):
+        raise httpx.ConnectError("nope")
+
+    with patch.object(svc, "_get_json", new=AsyncMock(side_effect=boom)):
+        # Never block a valid import on a permissions-probe failure.
+        assert await svc._token_has_permissions(object()) is True

@@ -192,6 +192,21 @@ def build_proxmox_properties(node: dict[str, Any]) -> list[dict[str, Any]]:
     return props
 
 
+def build_proxmox_cluster_links(nodes: list[dict[str, Any]]) -> list[tuple[str, str]]:
+    """Chain host nodes (``type == 'proxmox'``) into cluster links.
+
+    Hosts from one import belong to the same cluster, so they are linked
+    host↔host (rendered as ``cluster`` edges via left/right handles, distinct
+    from the vertical host→guest ``virtual`` edges). Returns consecutive
+    ``(source_ieee, target_ieee)`` pairs, or ``[]`` for a single host. Mirrors
+    the frontend ``buildProxmoxClusterEdges``.
+    """
+    hosts = [n["ieee_address"] for n in nodes if n.get("type") == "proxmox" and n.get("ieee_address")]
+    if len(hosts) < 2:
+        return []
+    return [(hosts[i], hosts[i + 1]) for i in range(len(hosts) - 1)]
+
+
 def _parse_inventory(
     hosts_raw: list[dict[str, Any]],
     guests_by_host: dict[str, list[dict[str, Any]]],
@@ -229,6 +244,23 @@ async def _get_json(client: httpx.AsyncClient, path: str) -> Any:
     resp = await client.get(path)
     resp.raise_for_status()
     return resp.json().get("data")
+
+
+async def _token_has_permissions(client: httpx.AsyncClient) -> bool:
+    """True if the API token holds *any* ACL.
+
+    Proxmox list endpoints (``/qemu``, ``/lxc``) silently return an empty
+    ``200`` when the token lacks ``VM.Audit`` — indistinguishable from a host
+    that genuinely has no guests. ``GET /access/permissions`` returns ``{}`` for
+    a token with no ACL at all, which is the common misconfiguration (a
+    privilege-separated token created without its own permission). Best-effort:
+    on any error assume permissions exist so we never block a valid import.
+    """
+    try:
+        perms = await _get_json(client, "/access/permissions")
+    except httpx.HTTPError:
+        return True
+    return bool(perms) if isinstance(perms, dict) else True
 
 
 async def fetch_proxmox_inventory(
@@ -339,8 +371,16 @@ async def test_proxmox_connection(
             timeout=timeout,
         ) as client:
             data = await _get_json(client, "/version")
+            has_perms = await _token_has_permissions(client)
         version = (data or {}).get("version", "?") if isinstance(data, dict) else "?"
-        return True, f"Connected to Proxmox VE {version}"
+        message = f"Connected to Proxmox VE {version}"
+        if not has_perms:
+            message += (
+                " — warning: this API token has no permissions, so VMs and LXC "
+                "will not be visible. Assign the PVEAuditor role at path '/' to the "
+                "token in Proxmox (Datacenter → Permissions → API Token Permission)."
+            )
+        return True, message
     except httpx.HTTPError as exc:
         return False, _sanitize_proxmox_error(exc)
     except Exception as exc:  # noqa: BLE001 — surface a safe message, log the rest

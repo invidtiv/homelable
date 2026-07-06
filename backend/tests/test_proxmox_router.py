@@ -9,9 +9,10 @@ import pytest
 from httpx import AsyncClient
 from sqlalchemy import select
 
-from app.api.routes.proxmox import _persist_pending_import
+from app.api.routes.proxmox import _guest_visibility_advisory, _persist_pending_import
+from app.api.routes.scan import _is_proxmox_cluster_member, _resolve_pending_links_for_ieee
 from app.core.config import settings
-from app.db.models import Node, PendingDevice
+from app.db.models import Design, Edge, Node, PendingDevice, PendingDeviceLink
 
 
 @pytest.fixture
@@ -115,6 +116,22 @@ async def test_enable_sync_without_token_rejected(client: AsyncClient, headers: 
     assert res.status_code == 400
 
 
+# --- guest-visibility advisory ---------------------------------------------
+
+def test_advisory_when_hosts_only() -> None:
+    msg = _guest_visibility_advisory([_host_node()])
+    assert msg is not None
+    assert "PVEAuditor" in msg
+
+
+def test_no_advisory_when_guests_present() -> None:
+    assert _guest_visibility_advisory([_host_node(), _guest_node(101, "10.0.0.5")]) is None
+
+
+def test_no_advisory_when_nothing_imported() -> None:
+    assert _guest_visibility_advisory([]) is None
+
+
 # --- persistence / dedupe --------------------------------------------------
 
 @pytest.mark.asyncio
@@ -191,6 +208,64 @@ async def test_pending_endpoint_tolerates_legacy_null_properties(client: AsyncCl
     res = await client.get("/api/v1/scan/pending", headers=headers)
     assert res.status_code == 200
     assert res.json()[0]["properties"] == []
+
+
+# --- cluster links ---------------------------------------------------------
+
+@pytest.mark.asyncio
+async def test_persist_records_cluster_links_between_hosts(db_session) -> None:
+    # Two hosts + a guest → one host↔host cluster link, one host→guest link.
+    nodes = [
+        {**_host_node(), "id": "pve-node-a", "ieee_address": "pve-node-a", "hostname": "a", "label": "a"},
+        {**_host_node(), "id": "pve-node-b", "ieee_address": "pve-node-b", "hostname": "b", "label": "b"},
+        _guest_node(101, "10.0.0.5"),
+    ]
+    edges = [{"source": "pve-node-pve1", "target": "pve-pve1-101"}]
+    await _persist_pending_import(db_session, nodes, edges)
+
+    links = (await db_session.execute(select(PendingDeviceLink))).scalars().all()
+    cluster = [ln for ln in links if ln.discovery_source == "proxmox_cluster"]
+    assert len(cluster) == 1
+    assert (cluster[0].source_ieee, cluster[0].target_ieee) == ("pve-node-a", "pve-node-b")
+    # Membership helper sees both endpoints.
+    assert await _is_proxmox_cluster_member(db_session, "pve-node-a") is True
+    assert await _is_proxmox_cluster_member(db_session, "pve-node-b") is True
+    assert await _is_proxmox_cluster_member(db_session, "pve-pve1-101") is False
+
+
+@pytest.mark.asyncio
+async def test_single_host_records_no_cluster_link(db_session) -> None:
+    await _persist_pending_import(db_session, [_host_node()], [])
+    links = (await db_session.execute(
+        select(PendingDeviceLink).where(PendingDeviceLink.discovery_source == "proxmox_cluster")
+    )).scalars().all()
+    assert links == []
+
+
+@pytest.mark.asyncio
+async def test_cluster_link_resolves_to_cluster_edge(db_session) -> None:
+    # Two host nodes already on a canvas + a pending cluster link between them.
+    design = Design(id=str(uuid.uuid4()), name="d")
+    db_session.add(design)
+    a = Node(id=str(uuid.uuid4()), type="proxmox", label="a", ieee_address="pve-node-a",
+             status="online", pos_x=0, pos_y=0, design_id=design.id,
+             left_handles=1, right_handles=1)
+    b = Node(id=str(uuid.uuid4()), type="proxmox", label="b", ieee_address="pve-node-b",
+             status="online", pos_x=0, pos_y=0, design_id=design.id,
+             left_handles=1, right_handles=1)
+    db_session.add_all([a, b])
+    db_session.add(PendingDeviceLink(
+        id=str(uuid.uuid4()), source_ieee="pve-node-a", target_ieee="pve-node-b",
+        discovery_source="proxmox_cluster",
+    ))
+    await db_session.commit()
+
+    await _resolve_pending_links_for_ieee(db_session, "pve-node-a")
+
+    edge = (await db_session.execute(select(Edge))).scalars().one()
+    assert edge.type == "cluster"
+    assert edge.source_handle == "right"
+    assert edge.target_handle == "left-t"
 
 
 @pytest.mark.asyncio

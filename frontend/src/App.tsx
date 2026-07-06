@@ -47,6 +47,7 @@ import type { NodeData, EdgeData, CustomStyleDef, FloorMapConfig, NodeType } fro
 import type { ZigbeeNode, ZigbeeEdge } from '@/components/zigbee/types'
 import type { ZwaveNode, ZwaveEdge } from '@/components/zwave/types'
 import type { ProxmoxNode, ProxmoxEdge } from '@/components/proxmox/types'
+import { buildProxmoxClusterEdges } from '@/components/proxmox/clusterEdges'
 
 const STANDALONE = import.meta.env.VITE_STANDALONE === 'true'
 
@@ -650,10 +651,16 @@ export default function App() {
     const cols = Math.min(COLS, pmNodes.length)
     const rows = Math.ceil(pmNodes.length / COLS)
     const origin = getCenteredPosition(cols * SPACING_X, rows * SPACING_Y)
+    // Multiple hosts from one import = a cluster → chain them via left/right
+    // 'cluster' edges. Those endpoints need one left + one right handle each
+    // (both default to 0), so grant them to the host nodes up front.
+    const clusterEdges = buildProxmoxClusterEdges(pmNodes)
+    const cluster = clusterEdges.length > 0
     pmNodes.forEach((pn, i) => {
       const col = i % COLS
       const row = Math.floor(i / COLS)
       const position = { x: origin.x + col * SPACING_X, y: origin.y + row * SPACING_Y }
+      const isClusterHost = cluster && pn.type === 'proxmox'
       const newNode: import('@xyflow/react').Node<NodeData> = {
         id: pn.id,
         type: pn.type,
@@ -665,6 +672,7 @@ export default function App() {
           services: [],
           ...(pn.ip ? { ip: pn.ip } : {}),
           ...(pn.hostname ? { hostname: pn.hostname } : {}),
+          ...(isClusterHost ? { left_handles: 1, right_handles: 1 } : {}),
         },
       }
       addNode(newNode)
@@ -677,6 +685,16 @@ export default function App() {
         target: pe.target,
         targetHandle: 'top-t',
         type: 'virtual',
+      } as unknown as import('@xyflow/react').Connection)
+    })
+    // Host ↔ host links render as 'cluster' edges (left → right chain).
+    clusterEdges.forEach((ce) => {
+      onConnect({
+        source: ce.source,
+        sourceHandle: ce.sourceHandle,
+        target: ce.target,
+        targetHandle: ce.targetHandle,
+        type: 'cluster',
       } as unknown as import('@xyflow/react').Connection)
     })
     const importedIds = new Set(pmNodes.map((pn) => pn.id))
