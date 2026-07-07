@@ -38,7 +38,7 @@ _MAGIC: dict[str, tuple[bytes, ...]] = {
 MAX_BYTES = 10 * 1024 * 1024  # 10 MB
 
 # Only ever serve/delete files we created: 32 hex chars + known extension.
-_NAME_RE = re.compile(r"^[0-9a-f]{32}\.(png|jpg|webp)$")
+_NAME_RE = re.compile(r"[0-9a-f]{32}\.(png|jpg|webp)")
 
 
 def _resolve_media_path(filename: str) -> Path:
@@ -48,7 +48,7 @@ def _resolve_media_path(filename: str) -> Path:
     resolved path is confirmed to sit directly under the resolved media dir.
     Raises 404 on any mismatch so we never leak whether a path exists elsewhere.
     """
-    if not _NAME_RE.match(filename):
+    if not _NAME_RE.fullmatch(filename):
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Not found")
     base = settings.media_dir().resolve()
     path = (base / filename).resolve()
