@@ -100,6 +100,118 @@ async def test_list_returns_created_designs_ordered(client: AsyncClient, headers
     assert ids == [a["id"], b["id"]]
 
 
+# ── counts in list ──────────────────────────────────────────────────────────
+
+async def test_list_includes_node_group_text_counts(client: AsyncClient, headers: dict):
+    design = await _create(client, headers, name="Counted")
+    server = node_payload(label="S", type="server")
+    group = node_payload(label="G", type="groupRect")
+    text = node_payload(label="T", type="text")
+    save = await client.post(
+        "/api/v1/canvas/save",
+        json={"nodes": [server, group, text], "edges": [], "viewport": {}, "design_id": design["id"]},
+        headers=headers,
+    )
+    assert save.status_code == 200
+    listed = (await client.get("/api/v1/designs", headers=headers)).json()
+    d = next(x for x in listed if x["id"] == design["id"])
+    assert d["node_count"] == 1
+    assert d["group_count"] == 1
+    assert d["text_count"] == 1
+
+
+async def test_list_counts_zero_for_empty_design(client: AsyncClient, headers: dict):
+    design = await _create(client, headers, name="Empty")
+    listed = (await client.get("/api/v1/designs", headers=headers)).json()
+    d = next(x for x in listed if x["id"] == design["id"])
+    assert d["node_count"] == 0
+    assert d["group_count"] == 0
+    assert d["text_count"] == 0
+
+
+# ── copy ──────────────────────────────────────────────────────────────────────
+
+async def test_copy_requires_auth(client: AsyncClient):
+    res = await client.post(f"/api/v1/designs/{uuid.uuid4()}/copy", json={"name": "X"})
+    assert res.status_code == 401
+
+
+async def test_copy_missing_source_returns_404(client: AsyncClient, headers: dict):
+    res = await client.post(f"/api/v1/designs/{uuid.uuid4()}/copy", json={"name": "X"}, headers=headers)
+    assert res.status_code == 404
+
+
+async def test_copy_duplicates_nodes_edges_and_remaps_ids(client: AsyncClient, headers: dict):
+    source = await _create(client, headers, name="Source", icon="server")
+    n1 = node_payload(label="A")
+    n2 = node_payload(label="B")
+    e1 = edge_payload(n1["id"], n2["id"], label="link")
+    save = await client.post(
+        "/api/v1/canvas/save",
+        json={"nodes": [n1, n2], "edges": [e1], "viewport": {"x": 5, "y": 6, "zoom": 2}, "design_id": source["id"]},
+        headers=headers,
+    )
+    assert save.status_code == 200
+
+    res = await client.post(
+        f"/api/v1/designs/{source['id']}/copy", json={"name": "Copy", "icon": "network"}, headers=headers,
+    )
+    assert res.status_code == 201, res.text
+    copy = res.json()
+    assert copy["name"] == "Copy"
+    assert copy["icon"] == "network"
+    assert copy["design_type"] == "network"
+    assert copy["id"] != source["id"]
+
+    # Copied canvas has the same shape but fresh node ids, and edge re-pointed.
+    canvas = (await client.get("/api/v1/canvas", params={"design_id": copy["id"]}, headers=headers)).json()
+    assert {n["label"] for n in canvas["nodes"]} == {"A", "B"}
+    copied_ids = {n["id"] for n in canvas["nodes"]}
+    assert copied_ids.isdisjoint({n1["id"], n2["id"]})
+    assert len(canvas["edges"]) == 1
+    edge = canvas["edges"][0]
+    assert edge["source"] in copied_ids
+    assert edge["target"] in copied_ids
+    assert edge["label"] == "link"
+    assert canvas["viewport"] == {"x": 5, "y": 6, "zoom": 2}
+
+
+async def test_copy_remaps_parent_child_relationship(client: AsyncClient, headers: dict):
+    source = await _create(client, headers, name="Nested")
+    parent = node_payload(label="P", type="proxmox", container_mode=True)
+    child = node_payload(label="C", type="vm", parent_id=parent["id"])
+    save = await client.post(
+        "/api/v1/canvas/save",
+        json={"nodes": [parent, child], "edges": [], "viewport": {}, "design_id": source["id"]},
+        headers=headers,
+    )
+    assert save.status_code == 200
+
+    res = await client.post(f"/api/v1/designs/{source['id']}/copy", json={"name": "Copy"}, headers=headers)
+    assert res.status_code == 201
+    copy = res.json()
+
+    canvas = (await client.get("/api/v1/canvas", params={"design_id": copy["id"]}, headers=headers)).json()
+    by_label = {n["label"]: n for n in canvas["nodes"]}
+    # Child's parent_id points at the COPIED parent, not the original.
+    assert by_label["C"]["parent_id"] == by_label["P"]["id"]
+    assert by_label["C"]["parent_id"] != parent["id"]
+
+
+async def test_copy_leaves_source_untouched(client: AsyncClient, headers: dict):
+    source = await _create(client, headers, name="Source")
+    n1 = node_payload(label="A")
+    await client.post(
+        "/api/v1/canvas/save",
+        json={"nodes": [n1], "edges": [], "viewport": {}, "design_id": source["id"]},
+        headers=headers,
+    )
+    await client.post(f"/api/v1/designs/{source['id']}/copy", json={"name": "Copy"}, headers=headers)
+    src_canvas = (await client.get("/api/v1/canvas", params={"design_id": source["id"]}, headers=headers)).json()
+    assert len(src_canvas["nodes"]) == 1
+    assert src_canvas["nodes"][0]["id"] == n1["id"]
+
+
 # ── update ────────────────────────────────────────────────────────────────────
 
 async def test_update_design_renames(client: AsyncClient, headers: dict):

@@ -90,6 +90,41 @@ export function createDesign(name: string, icon?: string | null, design_type: De
   return design
 }
 
+const GROUP_TYPE = 'groupRect'
+const TEXT_TYPE = 'text'
+
+/** Node/group/text counts for a design's saved canvas (0s when never saved). */
+export function designCounts(designId: string): Pick<Design, 'node_count' | 'group_count' | 'text_count'> {
+  const canvas = loadCanvas(designId)
+  const nodes = canvas?.nodes ?? []
+  let group = 0
+  let text = 0
+  let node = 0
+  for (const n of nodes) {
+    if (n.data?.type === GROUP_TYPE) group++
+    else if (n.data?.type === TEXT_TYPE) text++
+    else node++
+  }
+  return { node_count: node, group_count: group, text_count: text }
+}
+
+/** Return the design list with per-canvas counts filled in (for the copy picker). */
+export function listDesignsWithCounts(): Design[] {
+  return listDesigns().map((d) => ({ ...d, ...designCounts(d.id) }))
+}
+
+/** Deep-copy a design's canvas into a new design. Returns the new design. */
+export function copyDesign(sourceId: string, name: string, icon?: string | null): Design {
+  const design = createDesign(name, icon)
+  const source = loadCanvas(sourceId)
+  if (source) {
+    // localStorage canvas already stores React Flow nodes/edges by value; a fresh
+    // JSON round-trip is enough to detach the copy from the source.
+    saveCanvas(design.id, JSON.parse(JSON.stringify(source)) as StandaloneCanvas)
+  }
+  return design
+}
+
 export function updateDesign(id: string, patch: Partial<Pick<Design, 'name' | 'icon'>>): Design | null {
   const designs = listDesigns()
   const idx = designs.findIndex((d) => d.id === id)
