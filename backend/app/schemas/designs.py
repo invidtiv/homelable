@@ -16,6 +16,13 @@ class DesignUpdate(BaseModel):
     icon: str | None = None
 
 
+class DesignCopy(BaseModel):
+    """Create a new design by deep-copying an existing one's canvas."""
+
+    name: str
+    icon: str = "dashboard"
+
+
 class DesignResponse(BaseModel):
     id: str
     name: str
@@ -23,5 +30,10 @@ class DesignResponse(BaseModel):
     icon: str | None = None
     created_at: datetime
     updated_at: datetime
+    # Populated by list_designs so the "copy from existing" picker can show what
+    # each canvas holds. None on create/update/copy responses (not computed there).
+    node_count: int | None = None
+    group_count: int | None = None
+    text_count: int | None = None
 
     model_config = {"from_attributes": True}

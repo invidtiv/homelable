@@ -16,6 +16,7 @@ import type { Node, Edge } from '@xyflow/react'
 import type { NodeData, EdgeData } from '@/types'
 import { useCanvasStore } from '@/stores/canvasStore'
 import { demoNodes, demoEdges } from '@/utils/demoData'
+import * as standaloneStorage from '@/utils/standaloneStorage'
 
 const STORAGE_KEY = 'homelable_canvas'
 
@@ -259,5 +260,77 @@ describe('Demo data (standalone fallback)', () => {
     // Positions intact
     const router = nodes.find((n) => n.id === 'router-1')!
     expect(router.position).toEqual({ x: 300, y: 140 })
+  })
+})
+
+describe('Standalone copy-from-existing', () => {
+  beforeEach(() => localStorage.clear())
+
+  function typedNode(id: string, type: string): Node<NodeData> {
+    return {
+      id,
+      type,
+      position: { x: 0, y: 0 },
+      data: { label: id, type: type as NodeData['type'], status: 'unknown', services: [] },
+    }
+  }
+
+  it('designCounts buckets node / group / text types', () => {
+    const d = standaloneStorage.createDesign('Src')
+    standaloneStorage.saveCanvas(d.id, {
+      nodes: [typedNode('a', 'server'), typedNode('g', 'groupRect'), typedNode('t', 'text'), typedNode('b', 'router')],
+      edges: [],
+    })
+    expect(standaloneStorage.designCounts(d.id)).toEqual({ node_count: 2, group_count: 1, text_count: 1 })
+  })
+
+  it('designCounts returns zeros for a never-saved design', () => {
+    const d = standaloneStorage.createDesign('Empty')
+    expect(standaloneStorage.designCounts(d.id)).toEqual({ node_count: 0, group_count: 0, text_count: 0 })
+  })
+
+  it('listDesignsWithCounts attaches counts to every design', () => {
+    const a = standaloneStorage.createDesign('A')
+    standaloneStorage.saveCanvas(a.id, { nodes: [typedNode('a', 'server')], edges: [] })
+    standaloneStorage.createDesign('B')
+    const listed = standaloneStorage.listDesignsWithCounts()
+    expect(listed.find((x) => x.id === a.id)?.node_count).toBe(1)
+    expect(listed.find((x) => x.name === 'B')?.node_count).toBe(0)
+  })
+
+  it('copyDesign clones the source canvas into a new design', () => {
+    const src = standaloneStorage.createDesign('Source', 'server')
+    const edge: Edge<EdgeData> = { id: 'e1', source: 'a', target: 'b', data: { type: 'ethernet' } as EdgeData }
+    standaloneStorage.saveCanvas(src.id, { nodes: [typedNode('a', 'server'), typedNode('b', 'router')], edges: [edge] })
+
+    const copy = standaloneStorage.copyDesign(src.id, 'Copy', 'network')
+    expect(copy.id).not.toBe(src.id)
+    expect(copy.name).toBe('Copy')
+
+    const copied = standaloneStorage.loadCanvas(copy.id)!
+    expect(copied.nodes.map((n) => n.id).sort()).toEqual(['a', 'b'])
+    expect(copied.edges).toHaveLength(1)
+    // Source untouched.
+    expect(standaloneStorage.loadCanvas(src.id)!.nodes).toHaveLength(2)
+  })
+
+  it('copyDesign detaches the copy (mutating it leaves the source intact)', () => {
+    const src = standaloneStorage.createDesign('Source')
+    standaloneStorage.saveCanvas(src.id, { nodes: [typedNode('a', 'server')], edges: [] })
+    const copy = standaloneStorage.copyDesign(src.id, 'Copy')
+
+    const copied = standaloneStorage.loadCanvas(copy.id)!
+    copied.nodes.push(typedNode('z', 'server'))
+    standaloneStorage.saveCanvas(copy.id, copied)
+
+    expect(standaloneStorage.loadCanvas(src.id)!.nodes).toHaveLength(1)
+    expect(standaloneStorage.loadCanvas(copy.id)!.nodes).toHaveLength(2)
+  })
+
+  it('copyDesign on a never-saved source yields an empty new design', () => {
+    const src = standaloneStorage.createDesign('Bare')
+    const copy = standaloneStorage.copyDesign(src.id, 'Copy')
+    expect(standaloneStorage.loadCanvas(copy.id)).toBeNull()
+    expect(standaloneStorage.listDesigns().some((d) => d.id === copy.id)).toBe(true)
   })
 })

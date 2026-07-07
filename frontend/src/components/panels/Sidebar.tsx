@@ -56,9 +56,17 @@ export function Sidebar({ onAddNode, onAddGroupRect, onAddText, onScan, onZigbee
     if (!designModal) return
     try {
       if (designModal.mode === 'create') {
-        const created = STANDALONE
-          ? standaloneStorage.createDesign(data.name, data.icon)
-          : (await designsApi.create({ name: data.name, icon: data.icon })).data
+        let created: Design
+        if (data.sourceId) {
+          // Copy from an existing canvas (nodes, edges, viewport, floor plan).
+          created = STANDALONE
+            ? standaloneStorage.copyDesign(data.sourceId, data.name, data.icon)
+            : (await designsApi.copy(data.sourceId, { name: data.name, icon: data.icon })).data
+        } else {
+          created = STANDALONE
+            ? standaloneStorage.createDesign(data.name, data.icon)
+            : (await designsApi.create({ name: data.name, icon: data.icon })).data
+        }
         addDesign(created)
       } else if (designModal.design) {
         const updated = STANDALONE
@@ -306,6 +314,11 @@ export function Sidebar({ onAddNode, onAddGroupRect, onAddText, onScan, onZigbee
         showFloorMap={!STANDALONE && isActiveEdit}
         initialFloorMap={!STANDALONE && isActiveEdit ? floorMap : null}
         onUploadImage={handleUploadImage}
+        sourceDesigns={
+          designModal?.mode === 'create'
+            ? (STANDALONE ? standaloneStorage.listDesignsWithCounts() : designs)
+            : []
+        }
       />
     </aside>
   )
