@@ -43,11 +43,20 @@ _NODE_FIELDS = {
     },
 }
 
+# Optional design/canvas selector. The backend attaches nodes/edges to the first
+# design when design_id is omitted (see backend nodes.py / edges.py), so these
+# tools stay backward compatible; pass design_id to target a specific canvas.
+# Use list_designs to discover the available IDs.
+_DESIGN_ID_FIELD = {
+    "design_id": {"type": "string", "description": "Target design/canvas ID. Omit to use the default (first) canvas; call list_designs to discover IDs."},
+}
+
 
 def _build_tools() -> list[Tool]:
     create_node_props = {
         "type": {"type": "string", "enum": NODE_TYPES},
         **_NODE_FIELDS,
+        **_DESIGN_ID_FIELD,
     }
     create_node_props["status"] = {**_NODE_FIELDS["status"], "default": "unknown"}
 
@@ -81,6 +90,7 @@ def _build_tools() -> list[Tool]:
                 "target": {"type": "string"},
                 "type":   {"type": "string", "enum": ["ethernet", "wifi", "iot", "vlan", "virtual"], "default": "ethernet"},
                 "label":  {"type": "string"},
+                **_DESIGN_ID_FIELD,
             },
         }),
         Tool(name="delete_edge", description="Delete a network link", inputSchema={
@@ -110,13 +120,17 @@ def _build_tools() -> list[Tool]:
         }),
         Tool(name="get_canvas", description="Get the full canvas: all nodes and edges in the homelab topology", inputSchema={
             "type": "object",
-            "properties": {},
+            "properties": {**_DESIGN_ID_FIELD},
         }),
         Tool(name="list_nodes", description="List all nodes (devices) in the homelab", inputSchema={
             "type": "object",
             "properties": {},
         }),
         Tool(name="list_pending_devices", description="List devices discovered by scan but not yet approved or hidden", inputSchema={
+            "type": "object",
+            "properties": {},
+        }),
+        Tool(name="list_designs", description="List all designs (canvases) with their IDs and node/group/text counts", inputSchema={
             "type": "object",
             "properties": {},
         }),
@@ -192,7 +206,9 @@ async def _dispatch(name: str, args: dict) -> dict:
         return await backend.post(f"/api/v1/scan/pending/{args['id']}/hide", {})
 
     if name == "get_canvas":
-        raw = await backend.get("/api/v1/canvas")
+        design_id = args.get("design_id")
+        path = f"/api/v1/canvas?design_id={design_id}" if design_id else "/api/v1/canvas"
+        raw = await backend.get(path)
         return _slim_canvas(raw)
 
     if name == "list_nodes":
@@ -200,5 +216,8 @@ async def _dispatch(name: str, args: dict) -> dict:
 
     if name == "list_pending_devices":
         return await backend.get("/api/v1/scan/pending")
+
+    if name == "list_designs":
+        return await backend.get("/api/v1/designs")
 
     raise ValueError(f"Unknown tool: {name}")
