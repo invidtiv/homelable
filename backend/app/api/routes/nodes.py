@@ -10,6 +10,46 @@ from app.services.node_dedupe import find_duplicate_node
 
 router = APIRouter()
 
+# ---------------------------------------------------------------------------
+# Auto-positioning helpers
+# ---------------------------------------------------------------------------
+
+# Canvas grid used when placing nodes without explicit coordinates.
+# Each slot is wide/tall enough that a normal node card fits without overlap.
+_SLOT_W = 200.0
+_SLOT_H = 100.0
+_MAX_COLS = 7
+
+
+async def _find_free_position(db: AsyncSession, design_id: str | None) -> tuple[float, float]:
+    """Return (x, y) for a new root-level node that doesn't collide with existing ones.
+
+    Snaps existing root nodes to a virtual grid and returns the first unoccupied
+    cell, scanning left-to-right then top-to-bottom.
+    """
+    result = await db.execute(
+        select(Node.pos_x, Node.pos_y).where(
+            Node.design_id == design_id,
+            Node.parent_id.is_(None),
+        )
+    )
+    positions = list(result.all())
+    if not positions:
+        return 0.0, 0.0
+
+    occupied: set[tuple[int, int]] = set()
+    for (px, py) in positions:
+        col = max(0, round(px / _SLOT_W))
+        row = max(0, round(py / _SLOT_H))
+        occupied.add((col, row))
+
+    for row in range(10_000):
+        for col in range(_MAX_COLS):
+            if (col, row) not in occupied:
+                return col * _SLOT_W, row * _SLOT_H
+
+    return 0.0, 0.0  # unreachable in practice
+
 
 @router.get("", response_model=list[NodeResponse])
 async def list_nodes(db: AsyncSession = Depends(get_db), _: str = Depends(get_current_user)) -> list[Node]:
@@ -37,6 +77,22 @@ async def create_node(body: NodeCreate, db: AsyncSession = Depends(get_db), _: s
         dup = await find_duplicate_node(db, data["design_id"], data.get("ip"), data.get("mac"))
         if dup is not None:
             raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail=dup)
+
+    # Auto-position: when pos_x / pos_y are omitted (None), find a free canvas
+    # slot so the new node doesn't land on top of an existing one.
+    # Child nodes (parent_id set) use (0, 0) relative to their parent instead.
+    if data["pos_x"] is None or data["pos_y"] is None:
+        if data.get("parent_id") is None:
+            auto_x, auto_y = await _find_free_position(db, data["design_id"])
+            if data["pos_x"] is None:
+                data["pos_x"] = auto_x
+            if data["pos_y"] is None:
+                data["pos_y"] = auto_y
+        else:
+            if data["pos_x"] is None:
+                data["pos_x"] = 0.0
+            if data["pos_y"] is None:
+                data["pos_y"] = 0.0
 
     node = Node(**data)
     db.add(node)
