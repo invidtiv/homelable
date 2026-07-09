@@ -20,13 +20,67 @@ from __future__ import annotations
 import logging
 from typing import Any
 
-from sqlalchemy import select
+from sqlalchemy import or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.db.models import Edge, Node
 from app.services.zigbee_service import merge_zigbee_properties
 
 logger = logging.getLogger(__name__)
+
+
+async def find_duplicate_node(
+    db: AsyncSession,
+    design_id: str | None,
+    ip: str | None,
+    mac: str | None,
+    ieee: str | None = None,
+) -> dict[str, Any] | None:
+    """Return conflict details if an equivalent node (same ieee, ip OR mac)
+    already sits on ``design_id``, else ``None``.
+
+    Scoped to a single design on purpose: the same device may legitimately
+    appear on several canvases (one :class:`Node` per design). Only a second
+    node for the same ieee/ip/mac on the *same* design is a duplicate — which
+    the create/approve endpoints turn into a 409 so the UI can offer "go to
+    existing" vs "add duplicate anyway", uniformly for IEEE (Zigbee/Z-Wave) and
+    plain IP/ARP hosts.
+
+    (:func:`dedupe_nodes_by_ieee` still repairs *pre-existing* same-canvas IEEE
+    duplicates; this guard prevents new ones unless the user forces them.)
+    """
+    conds = []
+    if ieee:
+        conds.append(Node.ieee_address == ieee)
+    if ip:
+        conds.append(Node.ip == ip)
+    if mac:
+        conds.append(Node.mac == mac)
+    if not conds:
+        return None
+    existing = (
+        await db.execute(
+            select(Node).where(Node.design_id == design_id, or_(*conds))
+        )
+    ).scalars().first()
+    if existing is None:
+        return None
+    # Report whichever field actually matched (ieee > ip > mac when several do).
+    match: str
+    value: str | None
+    if ieee and existing.ieee_address == ieee:
+        match, value = "ieee", existing.ieee_address
+    elif ip and existing.ip == ip:
+        match, value = "ip", existing.ip
+    else:
+        match, value = "mac", existing.mac
+    return {
+        "duplicate": True,
+        "existing_node_id": existing.id,
+        "existing_label": existing.label,
+        "match": match,
+        "value": value,
+    }
 
 # Scalar Node fields worth carrying over from a duplicate when the canonical
 # node has no value. Positions, design, parent and identity fields are left on

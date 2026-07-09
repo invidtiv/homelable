@@ -14,6 +14,7 @@ const mockHide = vi.fn()
 const mockPending = vi.fn()
 const mockHidden = vi.fn()
 const mockAddNode = vi.fn()
+const mockSetSelectedNode = vi.fn()
 
 vi.mock('@/api/client', () => ({
   scanApi: {
@@ -30,11 +31,15 @@ vi.mock('@/api/client', () => ({
   },
 }))
 
-vi.mock('sonner', () => ({ toast: { success: vi.fn(), error: vi.fn() } }))
+vi.mock('sonner', () => ({ toast: { success: vi.fn(), error: vi.fn(), info: vi.fn() } }))
 
 vi.mock('@/components/modals/PendingDeviceModal', () => ({
-  PendingDeviceModal: ({ device }: { device: unknown }) =>
-    device ? <div data-testid="approval-modal" /> : null,
+  PendingDeviceModal: ({ device, onApprove }: { device: unknown; onApprove: (d: unknown) => void }) =>
+    device ? (
+      <div data-testid="approval-modal">
+        <button data-testid="do-approve" onClick={() => onApprove(device)}>approve</button>
+      </div>
+    ) : null,
 }))
 
 const DEVICE_IP = {
@@ -104,10 +109,12 @@ const DEVICE_PROXMOX = {
 
 beforeEach(() => {
   vi.clearAllMocks()
-  vi.mocked(useCanvasStore).mockReturnValue({
-    addNode: mockAddNode,
-    scanEventTs: 0,
-  } as unknown as ReturnType<typeof useCanvasStore>)
+  // Apply the selector when one is passed (setSelectedNode is read via a
+  // selector), else return the whole store (destructured in the component).
+  vi.mocked(useCanvasStore).mockImplementation(((sel?: (s: unknown) => unknown) => {
+    const store = { addNode: mockAddNode, scanEventTs: 0, setSelectedNode: mockSetSelectedNode }
+    return sel ? sel(store) : store
+  }) as unknown as typeof useCanvasStore)
   // setState is used by injectAutoEdges
   ;(useCanvasStore as unknown as { setState: (fn: unknown) => void }).setState = vi.fn()
   mockPending.mockResolvedValue({ data: [DEVICE_IP, DEVICE_ZIGBEE] })
@@ -115,7 +122,7 @@ beforeEach(() => {
   mockApprove.mockResolvedValue({ data: { node_id: 'n1', edges: [], edges_created: 0 } })
   mockHide.mockResolvedValue({ data: {} })
   mockBulkApprove.mockResolvedValue({
-    data: { approved: 2, node_ids: ['n1', 'n2'], device_ids: ['dev-a', 'dev-b'], edges: [], edges_created: 0 },
+    data: { approved: 2, node_ids: ['n1', 'n2'], device_ids: ['dev-a', 'dev-b'], edges: [], edges_created: 0, skipped_devices: [] },
   })
   mockBulkHide.mockResolvedValue({ data: { hidden: 2, skipped: 0 } })
   mockRestore.mockResolvedValue({ data: { restored: true, device_id: 'dev-a' } })
@@ -235,6 +242,60 @@ describe('PendingDevicesModal', () => {
     expect(screen.getByTestId('approval-modal')).toBeInTheDocument()
   })
 
+  const DUP_409 = {
+    response: {
+      status: 409,
+      data: {
+        detail: {
+          duplicate: true,
+          existing_node_id: 'n-existing',
+          existing_label: 'Existing Srv',
+          match: 'ip',
+          value: '192.168.1.10',
+        },
+      },
+    },
+  }
+
+  it('single approve prompts instead of failing when the host is already on the design', async () => {
+    mockApprove.mockRejectedValueOnce(DUP_409)
+    render(<PendingDevicesModal {...baseProps} />)
+    await waitFor(() => expect(screen.getByTestId('pending-card-dev-a')).toBeInTheDocument())
+    fireEvent.click(screen.getByTestId('pending-card-dev-a'))
+    fireEvent.click(screen.getByTestId('do-approve'))
+    // The duplicate dialog appears (not a silent failure).
+    await waitFor(() => expect(screen.getByText('Device already on this canvas')).toBeInTheDocument())
+    expect(screen.getByText('Existing Srv')).toBeInTheDocument()
+    // Regression: the device-detail modal must close so it doesn't trap focus
+    // and hide the prompt (two stacked Base UI dialogs).
+    expect(screen.queryByTestId('approval-modal')).not.toBeInTheDocument()
+  })
+
+  it('"Add duplicate anyway" retries the approve with force=true', async () => {
+    mockApprove.mockRejectedValueOnce(DUP_409)
+    render(<PendingDevicesModal {...baseProps} />)
+    await waitFor(() => expect(screen.getByTestId('pending-card-dev-a')).toBeInTheDocument())
+    fireEvent.click(screen.getByTestId('pending-card-dev-a'))
+    fireEvent.click(screen.getByTestId('do-approve'))
+    await waitFor(() => expect(screen.getByText('Device already on this canvas')).toBeInTheDocument())
+    fireEvent.click(screen.getByRole('button', { name: /Add duplicate anyway/ }))
+    await waitFor(() => expect(mockApprove).toHaveBeenCalledTimes(2))
+    expect(mockApprove).toHaveBeenLastCalledWith('dev-a', expect.objectContaining({ force: true }))
+  })
+
+  it('"Go to existing node" selects the existing node and closes the modal', async () => {
+    mockApprove.mockRejectedValueOnce(DUP_409)
+    const onClose = vi.fn()
+    render(<PendingDevicesModal {...baseProps} onClose={onClose} />)
+    await waitFor(() => expect(screen.getByTestId('pending-card-dev-a')).toBeInTheDocument())
+    fireEvent.click(screen.getByTestId('pending-card-dev-a'))
+    fireEvent.click(screen.getByTestId('do-approve'))
+    await waitFor(() => expect(screen.getByText('Device already on this canvas')).toBeInTheDocument())
+    fireEvent.click(screen.getByRole('button', { name: /Go to existing node/ }))
+    expect(mockSetSelectedNode).toHaveBeenCalledWith('n-existing')
+    expect(onClose).toHaveBeenCalled()
+  })
+
   it('toggles selection in select mode instead of opening approval', async () => {
     render(<PendingDevicesModal {...baseProps} />)
     await waitFor(() => expect(screen.getByTestId('pending-card-dev-a')).toBeInTheDocument())
@@ -261,6 +322,29 @@ describe('PendingDevicesModal', () => {
     fireEvent.click(screen.getByTestId('pending-card-dev-b'))
     fireEvent.click(screen.getByRole('button', { name: /Approve \(2\)/ }))
     await waitFor(() => expect(mockBulkApprove).toHaveBeenCalledWith(['dev-a', 'dev-b'], null))
+  })
+
+  it('bulk approve reports devices skipped as duplicates', async () => {
+    const { toast } = await import('sonner')
+    mockBulkApprove.mockResolvedValue({
+      data: {
+        approved: 1, node_ids: ['n1'], device_ids: ['dev-b'], edges: [], edges_created: 0,
+        skipped: 1,
+        skipped_devices: [{ device_id: 'dev-a', label: 'host-a', match: 'ip', value: '192.168.1.10', existing_node_id: 'n-existing' }],
+      },
+    })
+    render(<PendingDevicesModal {...baseProps} />)
+    await waitFor(() => expect(screen.getByTestId('pending-card-dev-a')).toBeInTheDocument())
+    fireEvent.click(screen.getByRole('button', { name: 'Select mode' }))
+    fireEvent.click(screen.getByTestId('pending-card-dev-a'))
+    fireEvent.click(screen.getByTestId('pending-card-dev-b'))
+    fireEvent.click(screen.getByRole('button', { name: /Approve \(2\)/ }))
+    await waitFor(() =>
+      expect(toast.info).toHaveBeenCalledWith(
+        expect.stringContaining('1 already on this canvas'),
+        expect.anything(),
+      ),
+    )
   })
 
   it('keeps approved devices listed after bulk approve (reloads, not strips)', async () => {

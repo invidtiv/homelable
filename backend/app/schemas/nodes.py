@@ -39,6 +39,10 @@ class NodeBase(BaseModel):
 
 class NodeCreate(NodeBase):
     design_id: str | None = None
+    # When a node with the same ip/mac already exists on the target design, the
+    # create/approve endpoints reject with 409 so the UI can ask the user. Set
+    # force=True to bypass that guard and create the duplicate deliberately.
+    force: bool = False
 
 
 class NodeUpdate(BaseModel):

@@ -312,11 +312,11 @@ async def test_approve_device(client: AsyncClient, headers, pending_device):
 
 
 @pytest.mark.asyncio
-async def test_approve_device_no_dupe_same_ieee_same_design(
+async def test_approve_device_conflicts_on_existing_ieee_same_design(
     client: AsyncClient, headers, db_session
 ):
-    """Approving a device whose IEEE is already on the target design must reuse
-    the existing node, not create a duplicate (source of the crash bug)."""
+    """Approving a device whose IEEE is already on the target design prompts the
+    user (409) instead of silently merging/replacing — same UX as ip/mac."""
     design = Design(name="d1")
     db_session.add(design)
     await db_session.flush()
@@ -340,13 +340,195 @@ async def test_approve_device_no_dupe_same_ieee_same_design(
         },
         headers=headers,
     )
-    assert res.status_code == 200
-    assert res.json()["node_id"] == existing.id  # reused, not new
+    assert res.status_code == 409
+    detail = res.json()["detail"]
+    assert detail["duplicate"] is True
+    assert detail["existing_node_id"] == existing.id
+    assert detail["match"] == "ieee"
+    assert detail["value"] == "0xZZZ"
 
+    # No second node created; device stays pending until the user decides.
     nodes = (
         await db_session.execute(select(Node).where(Node.ieee_address == "0xZZZ"))
     ).scalars().all()
-    assert len(nodes) == 1  # no duplicate created
+    assert len(nodes) == 1
+
+
+@pytest.mark.asyncio
+async def test_approve_device_force_creates_duplicate_ieee(
+    client: AsyncClient, headers, db_session
+):
+    """force=True lets the user place a second card for the same IEEE."""
+    design = Design(name="d1")
+    db_session.add(design)
+    await db_session.flush()
+    db_session.add(Node(
+        label="sensor", type="zigbee_enddevice", ieee_address="0xZZZ",
+        services=[], design_id=design.id,
+    ))
+    device = PendingDevice(
+        id=str(uuid.uuid4()), ieee_address="0xZZZ", suggested_type="zigbee_enddevice",
+        status="pending", discovery_source="zigbee",
+    )
+    db_session.add(device)
+    await db_session.commit()
+
+    res = await client.post(
+        f"/api/v1/scan/pending/{device.id}/approve",
+        json={
+            "label": "sensor", "type": "zigbee_enddevice", "status": "online",
+            "services": [], "design_id": design.id, "force": True,
+        },
+        headers=headers,
+    )
+    assert res.status_code == 200
+    nodes = (
+        await db_session.execute(select(Node).where(Node.ieee_address == "0xZZZ"))
+    ).scalars().all()
+    assert len(nodes) == 2
+
+
+@pytest.mark.asyncio
+async def test_approve_device_conflicts_on_existing_ip(
+    client: AsyncClient, headers, db_session, pending_device
+):
+    """An ordinary host whose ip already sits on the target design is NOT
+    silently duplicated: the approve returns 409 with the existing node so the
+    UI can ask the user."""
+    design = await _add_design(db_session, "Home")
+    existing = _node(design, ip="192.168.1.100")
+    db_session.add(existing)
+    await db_session.commit()
+
+    res = await client.post(
+        f"/api/v1/scan/pending/{pending_device.id}/approve",
+        json={"label": "dup", "type": "server", "ip": "192.168.1.100",
+              "status": "unknown", "services": [], "design_id": design},
+        headers=headers,
+    )
+    assert res.status_code == 409
+    detail = res.json()["detail"]
+    assert detail["duplicate"] is True
+    assert detail["existing_node_id"] == existing.id
+    assert detail["match"] == "ip"
+    assert detail["value"] == "192.168.1.100"
+
+    # No node created, device left pending (user hasn't decided yet).
+    nodes = (await db_session.execute(select(Node).where(Node.design_id == design))).scalars().all()
+    assert len(nodes) == 1
+    await db_session.refresh(pending_device)
+    assert pending_device.status == "pending"
+
+
+@pytest.mark.asyncio
+async def test_approve_device_conflicts_on_existing_mac(
+    client: AsyncClient, headers, db_session, pending_device
+):
+    """MAC match (device re-IP'd via DHCP) also triggers the duplicate guard."""
+    design = await _add_design(db_session, "Home")
+    existing = Node(id=str(uuid.uuid4()), label="n", type="server", status="online",
+                    ip="10.0.0.9", mac="aa:bb:cc:dd:ee:ff", services=[], design_id=design)
+    db_session.add(existing)
+    await db_session.commit()
+
+    # pending_device carries mac aa:bb:cc:dd:ee:ff but a different ip.
+    res = await client.post(
+        f"/api/v1/scan/pending/{pending_device.id}/approve",
+        json={"label": "dup", "type": "server", "ip": "192.168.1.55",
+              "mac": "aa:bb:cc:dd:ee:ff", "status": "unknown", "services": [],
+              "design_id": design},
+        headers=headers,
+    )
+    assert res.status_code == 409
+    assert res.json()["detail"]["match"] == "mac"
+
+
+@pytest.mark.asyncio
+async def test_approve_device_force_creates_duplicate(
+    client: AsyncClient, headers, db_session, pending_device
+):
+    """force=True (user confirmed) bypasses the guard and creates the node."""
+    design = await _add_design(db_session, "Home")
+    db_session.add(_node(design, ip="192.168.1.100"))
+    await db_session.commit()
+
+    res = await client.post(
+        f"/api/v1/scan/pending/{pending_device.id}/approve",
+        json={"label": "dup", "type": "server", "ip": "192.168.1.100",
+              "status": "unknown", "services": [], "design_id": design, "force": True},
+        headers=headers,
+    )
+    assert res.status_code == 200
+    nodes = (await db_session.execute(select(Node).where(Node.design_id == design))).scalars().all()
+    assert len(nodes) == 2  # duplicate deliberately created
+
+
+@pytest.mark.asyncio
+async def test_approve_device_allows_same_ip_on_other_design(
+    client: AsyncClient, headers, db_session, pending_device
+):
+    """The guard is per-design: the same host on a different canvas is fine."""
+    other = await _add_design(db_session, "Lab")
+    target = await _add_design(db_session, "Home")
+    db_session.add(_node(other, ip="192.168.1.100"))  # exists on a DIFFERENT design
+    await db_session.commit()
+
+    res = await client.post(
+        f"/api/v1/scan/pending/{pending_device.id}/approve",
+        json={"label": "ok", "type": "server", "ip": "192.168.1.100",
+              "status": "unknown", "services": [], "design_id": target},
+        headers=headers,
+    )
+    assert res.status_code == 200
+
+
+@pytest.mark.asyncio
+async def test_approve_device_places_already_approved_on_another_design(
+    client: AsyncClient, headers, db_session
+):
+    """A device already approved on ANOTHER canvas (global status="approved")
+    must still be placeable on a new design — status is global, canvas
+    membership is per-design (mirrors bulk_approve)."""
+    other = await _add_design(db_session, "Other")
+    target = await _add_design(db_session, "Network Topology")
+    # Device is on `other` already (its global status is "approved").
+    db_session.add(_node(other, ieee="0x00158d0005292b83"))
+    device = PendingDevice(
+        id=str(uuid.uuid4()), ieee_address="0x00158d0005292b83",
+        suggested_type="zigbee_enddevice", status="approved",
+        discovery_source="zigbee",
+    )
+    db_session.add(device)
+    await db_session.commit()
+
+    res = await client.post(
+        f"/api/v1/scan/pending/{device.id}/approve",
+        json={"label": "sensor", "type": "zigbee_enddevice", "status": "online",
+              "services": [], "design_id": target},
+        headers=headers,
+    )
+    assert res.status_code == 200
+    # A node now exists on the target design too (one per canvas).
+    nodes = (
+        await db_session.execute(
+            select(Node).where(Node.ieee_address == "0x00158d0005292b83")
+        )
+    ).scalars().all()
+    assert {n.design_id for n in nodes} == {other, target}
+
+
+@pytest.mark.asyncio
+async def test_approve_device_rejects_hidden(client: AsyncClient, headers, db_session, pending_device):
+    """A user-hidden device is not approvable via this endpoint."""
+    pending_device.status = "hidden"
+    db_session.add(pending_device)
+    await db_session.commit()
+    res = await client.post(
+        f"/api/v1/scan/pending/{pending_device.id}/approve",
+        json={"label": "x", "type": "server", "status": "unknown", "services": []},
+        headers=headers,
+    )
+    assert res.status_code == 409
 
 
 @pytest.mark.asyncio
@@ -901,6 +1083,34 @@ async def test_bulk_approve_skips_device_already_on_target_design(
     # The pre-existing node plus the one newly approved — no duplicate for .10.
     assert len(nodes) == 2
     assert sorted(n.ip for n in nodes) == ["192.168.1.10", "192.168.1.11"]
+
+
+@pytest.mark.asyncio
+async def test_bulk_approve_reports_skipped_devices(
+    client: AsyncClient, headers, db_session, two_pending_devices
+):
+    """Bulk can't prompt per-device, so it reports each duplicate it skipped
+    (with the existing node id) instead of silently dropping it."""
+    ids = [d.id for d in two_pending_devices]
+    design = await _add_design(db_session, "Canvas")
+    existing = _node(design, ip="192.168.1.10")
+    db_session.add(existing)
+    await db_session.commit()
+
+    res = await client.post(
+        "/api/v1/scan/pending/bulk-approve",
+        json={"device_ids": ids, "design_id": design},
+        headers=headers,
+    )
+    data = res.json()
+    assert data["approved"] == 1
+    skipped = data["skipped_devices"]
+    assert len(skipped) == 1
+    entry = skipped[0]
+    assert entry["match"] == "ip"
+    assert entry["value"] == "192.168.1.10"
+    assert entry["existing_node_id"] == existing.id
+    assert entry["device_id"] in ids
 
 
 @pytest.fixture

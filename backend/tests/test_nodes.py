@@ -99,6 +99,47 @@ async def test_create_node_respects_explicit_design_id(client: AsyncClient, head
     assert res.json()["design_id"] == second_id
 
 
+async def test_create_node_rejects_duplicate_ip_on_same_design(client: AsyncClient, headers: dict):
+    # A second node with the same ip on the same design is a silent duplicate —
+    # scripts/MCP clients get 409 with the existing node id instead. (#260)
+    design = await client.post("/api/v1/designs", json={"name": "D"}, headers=headers)
+    design_id = design.json()["id"]
+    first = await client.post(
+        "/api/v1/nodes",
+        json={"type": "server", "label": "srv", "ip": "192.168.1.5", "design_id": design_id},
+        headers=headers,
+    )
+    assert first.status_code == 201
+    existing_id = first.json()["id"]
+
+    dup = await client.post(
+        "/api/v1/nodes",
+        json={"type": "server", "label": "srv-again", "ip": "192.168.1.5", "design_id": design_id},
+        headers=headers,
+    )
+    assert dup.status_code == 409
+    detail = dup.json()["detail"]
+    assert detail["duplicate"] is True
+    assert detail["existing_node_id"] == existing_id
+    assert detail["match"] == "ip"
+
+
+async def test_create_node_force_bypasses_duplicate_guard(client: AsyncClient, headers: dict):
+    design = await client.post("/api/v1/designs", json={"name": "D"}, headers=headers)
+    design_id = design.json()["id"]
+    await client.post(
+        "/api/v1/nodes",
+        json={"type": "server", "label": "srv", "ip": "192.168.1.5", "design_id": design_id},
+        headers=headers,
+    )
+    forced = await client.post(
+        "/api/v1/nodes",
+        json={"type": "server", "label": "srv", "ip": "192.168.1.5", "design_id": design_id, "force": True},
+        headers=headers,
+    )
+    assert forced.status_code == 201
+
+
 async def test_create_node_without_any_design_stays_null(client: AsyncClient, headers: dict):
     # No designs exist yet: fallback can't invent one, so design_id stays null
     # rather than erroring.
