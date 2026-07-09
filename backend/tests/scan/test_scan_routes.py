@@ -1,0 +1,262 @@
+"""Scan API routes: trigger, pending list, canvas-count correlation, timestamps, config."""
+import uuid
+from datetime import datetime, timezone
+from unittest.mock import AsyncMock, patch
+
+import pytest
+from httpx import AsyncClient
+
+from app.db.models import PendingDevice
+from tests.scan.helpers import _add_design, _node
+
+
+@pytest.mark.asyncio
+async def test_trigger_scan_requires_auth(client: AsyncClient):
+    res = await client.post("/api/v1/scan/trigger")
+    assert res.status_code == 401
+
+
+@pytest.mark.asyncio
+async def test_trigger_scan_creates_run(client: AsyncClient, headers):
+    with (
+        patch("app.api.routes.scan._background_scan", new_callable=AsyncMock),
+        patch("app.api.routes.scan.settings") as mock_settings,
+    ):
+        mock_settings.scanner_ranges = ["192.168.1.0/24"]
+        res = await client.post("/api/v1/scan/trigger", headers=headers)
+    assert res.status_code == 200
+    data = res.json()
+    assert data["status"] == "running"
+    assert data["ranges"] == ["192.168.1.0/24"]
+    assert "id" in data
+
+
+@pytest.mark.asyncio
+async def test_list_pending_empty(client: AsyncClient, headers):
+    res = await client.get("/api/v1/scan/pending", headers=headers)
+    assert res.status_code == 200
+    assert res.json() == []
+
+
+@pytest.mark.asyncio
+async def test_list_pending_returns_device(client: AsyncClient, headers, pending_device):
+    res = await client.get("/api/v1/scan/pending", headers=headers)
+    assert res.status_code == 200
+    data = res.json()
+    assert len(data) == 1
+    assert data[0]["ip"] == "192.168.1.100"
+    assert data[0]["hostname"] == "my-server"
+    # No matching node → not on any canvas.
+    assert data[0]["canvas_count"] == 0
+
+
+@pytest.mark.asyncio
+async def test_canvas_count_matches_ip_in_comma_list(client, headers, db_session, pending_device):
+    # Node.ip holds several comma-separated addresses (IPv6 added first). The
+    # device scanned as the plain IPv4 must still correlate (issue #258).
+    d1 = await _add_design(db_session, "Home")
+    db_session.add(_node(d1, ip="fe80::1, 192.168.1.100"))
+    await db_session.commit()
+
+    data = (await client.get("/api/v1/scan/pending", headers=headers)).json()
+    assert data[0]["canvas_count"] == 1
+
+
+@pytest.mark.asyncio
+async def test_canvas_count_correlates_by_mac(client, headers, db_session, pending_device):
+    # Node's ip differs entirely (user edited it) but the MAC still matches:
+    # the device is on the canvas (issue #258, MAC is the stable identifier).
+    d1 = await _add_design(db_session, "Home")
+    db_session.add(_node(d1, ip="10.9.9.9", mac="aa:bb:cc:dd:ee:ff"))
+    await db_session.commit()
+
+    data = (await client.get("/api/v1/scan/pending", headers=headers)).json()
+    assert data[0]["canvas_count"] == 1
+
+
+@pytest.mark.asyncio
+async def test_canvas_count_counts_distinct_designs_by_ip(client, headers, db_session, pending_device):
+    # Same IP placed on two different canvases → canvas_count == 2.
+    d1 = await _add_design(db_session, "Home")
+    d2 = await _add_design(db_session, "Lab")
+    db_session.add(_node(d1, ip="192.168.1.100"))
+    db_session.add(_node(d2, ip="192.168.1.100"))
+    await db_session.commit()
+
+    res = await client.get("/api/v1/scan/pending", headers=headers)
+    data = res.json()
+    assert len(data) == 1
+    assert data[0]["canvas_count"] == 2
+
+
+@pytest.mark.asyncio
+async def test_canvas_count_correlates_by_ieee(client, headers, db_session):
+    device = PendingDevice(
+        id=str(uuid.uuid4()), ieee_address="0x00124b001", discovery_source="zigbee",
+        suggested_type="zigbee_enddevice", services=[], status="pending",
+    )
+    db_session.add(device)
+    d1 = await _add_design(db_session, "Zigbee")
+    db_session.add(_node(d1, ieee="0x00124b001"))
+    await db_session.commit()
+
+    res = await client.get("/api/v1/scan/pending", headers=headers)
+    by_id = {d["id"]: d for d in res.json()}
+    assert by_id[device.id]["canvas_count"] == 1
+
+
+@pytest.mark.asyncio
+async def test_pending_device_without_node_has_null_node_timestamps(client, headers, pending_device):
+    # No matching canvas node → node_* timestamps are all null; the device still
+    # carries its own discovered_at for the "Discovered" fallback on the tile.
+    data = (await client.get("/api/v1/scan/pending", headers=headers)).json()[0]
+    assert data["discovered_at"] is not None
+    assert data["node_created_at"] is None
+    assert data["node_last_scan"] is None
+    assert data["node_last_modified"] is None
+    assert data["node_last_seen"] is None
+
+
+@pytest.mark.asyncio
+async def test_pending_device_exposes_linked_node_timestamps(client, headers, db_session, pending_device):
+    d1 = await _add_design(db_session, "Home")
+    node = _node(d1, ip="192.168.1.100")
+    node.last_scan = datetime(2026, 6, 1, 8, 30, tzinfo=timezone.utc)
+    node.last_seen = datetime(2026, 6, 25, 9, 15, tzinfo=timezone.utc)
+    db_session.add(node)
+    await db_session.commit()
+
+    data = (await client.get("/api/v1/scan/pending", headers=headers)).json()[0]
+    assert data["node_created_at"] is not None      # defaulted on insert
+    assert data["node_last_modified"] is not None    # updated_at defaulted on insert
+    assert data["node_last_scan"].startswith("2026-06-01")
+    assert data["node_last_seen"].startswith("2026-06-25")
+
+
+@pytest.mark.asyncio
+async def test_node_timestamps_aggregate_across_matches(client, headers, db_session, pending_device):
+    # Two canvas nodes share the device IP: created_at takes the OLDEST,
+    # last_scan takes the NEWEST.
+    d1 = await _add_design(db_session, "Home")
+    d2 = await _add_design(db_session, "Lab")
+    older = _node(d1, ip="192.168.1.100")
+    older.created_at = datetime(2026, 1, 1, 0, 0, tzinfo=timezone.utc)
+    older.last_scan = datetime(2026, 3, 1, 0, 0, tzinfo=timezone.utc)
+    newer = _node(d2, ip="192.168.1.100")
+    newer.created_at = datetime(2026, 5, 1, 0, 0, tzinfo=timezone.utc)
+    newer.last_scan = datetime(2026, 6, 1, 0, 0, tzinfo=timezone.utc)
+    db_session.add_all([older, newer])
+    await db_session.commit()
+
+    data = (await client.get("/api/v1/scan/pending", headers=headers)).json()[0]
+    assert data["node_created_at"].startswith("2026-01-01")  # oldest
+    assert data["node_last_scan"].startswith("2026-06-01")   # newest
+
+
+@pytest.mark.asyncio
+async def test_resolve_deep_scan_falls_back_to_settings():
+    from app.api.routes.scan import TriggerScanRequest, _resolve_deep_scan
+
+    with patch("app.api.routes.scan.settings") as mock_settings:
+        mock_settings.scanner_http_ranges = ["7000-7100"]
+        mock_settings.scanner_http_probe_enabled = True
+        mock_settings.scanner_http_verify_tls = False
+        # Empty payload → all values come from settings defaults
+        ds = _resolve_deep_scan(TriggerScanRequest())
+    assert ds.http_ranges == ["7000-7100"]
+    assert ds.http_probe_enabled is True
+    assert ds.verify_tls is False
+
+
+@pytest.mark.asyncio
+async def test_resolve_deep_scan_override_wins():
+    from app.api.routes.scan import TriggerScanRequest, _resolve_deep_scan
+
+    with patch("app.api.routes.scan.settings") as mock_settings:
+        mock_settings.scanner_http_ranges = []
+        mock_settings.scanner_http_probe_enabled = False
+        mock_settings.scanner_http_verify_tls = False
+        ds = _resolve_deep_scan(
+            TriggerScanRequest(http_ranges=["9000"], http_probe_enabled=True, verify_tls=True)
+        )
+    assert ds.http_ranges == ["9000"]
+    assert ds.http_probe_enabled is True
+    assert ds.verify_tls is True
+
+
+@pytest.mark.asyncio
+async def test_trigger_scan_passes_deep_scan_options(client: AsyncClient, headers):
+    captured = {}
+
+    async def fake_bg(run_id, ranges, deep_scan):
+        captured["deep_scan"] = deep_scan
+
+    with (
+        patch("app.api.routes.scan._background_scan", new=fake_bg),
+        patch("app.api.routes.scan.settings") as mock_settings,
+    ):
+        mock_settings.scanner_ranges = ["192.168.1.0/24"]
+        mock_settings.scanner_http_ranges = []
+        mock_settings.scanner_http_probe_enabled = False
+        mock_settings.scanner_http_verify_tls = False
+        res = await client.post(
+            "/api/v1/scan/trigger",
+            json={"http_probe_enabled": True, "http_ranges": ["8000-8100"]},
+            headers=headers,
+        )
+    assert res.status_code == 200
+    assert captured["deep_scan"].http_probe_enabled is True
+    assert captured["deep_scan"].http_ranges == ["8000-8100"]
+
+
+@pytest.mark.asyncio
+async def test_trigger_scan_rejects_invalid_port_range(client: AsyncClient, headers):
+    with patch("app.api.routes.scan.settings") as mock_settings:
+        mock_settings.scanner_ranges = ["192.168.1.0/24"]
+        res = await client.post(
+            "/api/v1/scan/trigger",
+            json={"http_ranges": ["70000-80000"]},
+            headers=headers,
+        )
+    assert res.status_code == 422
+
+
+@pytest.mark.asyncio
+async def test_get_scan_config_includes_deep_scan(client: AsyncClient, headers):
+    with patch("app.api.routes.scan.settings") as mock_settings:
+        mock_settings.scanner_ranges = ["192.168.1.0/24"]
+        mock_settings.scanner_http_ranges = ["8000-8100"]
+        mock_settings.scanner_http_probe_enabled = True
+        mock_settings.scanner_http_verify_tls = False
+        res = await client.get("/api/v1/scan/config", headers=headers)
+    assert res.status_code == 200
+    data = res.json()
+    assert data["http_ranges"] == ["8000-8100"]
+    assert data["http_probe_enabled"] is True
+
+
+@pytest.mark.asyncio
+async def test_update_scan_config_persists_deep_scan(client: AsyncClient, headers):
+    saved = {}
+
+    with patch("app.api.routes.scan.settings") as mock_settings:
+        mock_settings.scanner_ranges = ["192.168.1.0/24"]
+        mock_settings.scanner_http_ranges = []
+        mock_settings.scanner_http_probe_enabled = False
+        mock_settings.scanner_http_verify_tls = False
+        mock_settings.save_overrides = lambda: saved.update(
+            http_ranges=mock_settings.scanner_http_ranges,
+            probe=mock_settings.scanner_http_probe_enabled,
+        )
+        res = await client.post(
+            "/api/v1/scan/config",
+            json={
+                "ranges": ["192.168.1.0/24"],
+                "http_ranges": ["9000-9100"],
+                "http_probe_enabled": True,
+                "verify_tls": True,
+            },
+            headers=headers,
+        )
+    assert res.status_code == 200
+    assert saved == {"http_ranges": ["9000-9100"], "probe": True}
