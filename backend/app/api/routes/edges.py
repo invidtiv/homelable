@@ -4,10 +4,55 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.api.deps import get_current_user
 from app.db.database import get_db
-from app.db.models import Design, Edge
+from app.db.models import Design, Edge, Node
 from app.schemas.edges import EdgeCreate, EdgeResponse, EdgeUpdate
 
 router = APIRouter()
+
+# ---------------------------------------------------------------------------
+# Auto-handle helpers
+# ---------------------------------------------------------------------------
+
+
+async def _abs_y(db: AsyncSession, node_id: str) -> float | None:
+    """Resolve the approximate absolute canvas Y of a node.
+
+    Walks up the parent chain (up to 8 levels) and accumulates pos_y offsets so
+    that children inside containers are compared correctly against top-level nodes.
+    Returns None when the node is not found.
+    """
+    node = await db.get(Node, node_id)
+    if node is None:
+        return None
+    y = node.pos_y
+    current = node
+    for _ in range(8):
+        if current.parent_id is None:
+            break
+        parent = await db.get(Node, current.parent_id)
+        if parent is None:
+            break
+        y += parent.pos_y
+        current = parent
+    return y
+
+
+async def _auto_handles(
+    db: AsyncSession, source_id: str, target_id: str
+) -> tuple[str, str]:
+    """Return (source_handle, target_handle) that reflect the upstream/downstream
+    relationship between two nodes.
+
+    - Source above target (lower Y value) → downstream flow: exit bottom, enter top
+    - Source below target → upstream flow: exit top, enter bottom
+    - Equal or unknown → default to bottom/top-t (most common topology direction)
+    """
+    src_y = await _abs_y(db, source_id)
+    tgt_y = await _abs_y(db, target_id)
+
+    if src_y is None or tgt_y is None or src_y <= tgt_y:
+        return "bottom", "top-t"
+    return "top", "bottom-t"
 
 
 @router.get("", response_model=list[EdgeResponse])
@@ -25,6 +70,18 @@ async def create_edge(body: EdgeCreate, db: AsyncSession = Depends(get_db), _: s
     if data.get("design_id") is None:
         first_design = (await db.execute(select(Design).order_by(Design.created_at).limit(1))).scalar()
         data["design_id"] = first_design.id if first_design else None
+
+    # Auto-assign source/target handles when the caller omits them.
+    # Compares the canvas Y positions of both nodes so that the edge always exits
+    # the upstream node's bottom and enters the downstream node's top (or vice versa
+    # for reverse flows), matching the UI convention for top-to-bottom topologies.
+    if data.get("source_handle") is None or data.get("target_handle") is None:
+        auto_src, auto_tgt = await _auto_handles(db, data["source"], data["target"])
+        if data.get("source_handle") is None:
+            data["source_handle"] = auto_src
+        if data.get("target_handle") is None:
+            data["target_handle"] = auto_tgt
+
     edge = Edge(**data)
     db.add(edge)
     await db.commit()

@@ -78,6 +78,21 @@ async def test_create_edge(mock_backend):
 
 
 @pytest.mark.anyio
+async def test_create_node_with_design_id(mock_backend):
+    # design_id is forwarded to the backend, which attaches the node to that canvas.
+    args = {"type": "server", "label": "Proxmox", "design_id": "design-2"}
+    await _dispatch("create_node", dict(args))
+    mock_backend.post.assert_called_once_with("/api/v1/nodes", args)
+
+
+@pytest.mark.anyio
+async def test_create_edge_with_design_id(mock_backend):
+    args = {"source": "1", "target": "2", "type": "ethernet", "design_id": "design-2"}
+    await _dispatch("create_edge", dict(args))
+    mock_backend.post.assert_called_once_with("/api/v1/edges", args)
+
+
+@pytest.mark.anyio
 async def test_delete_edge(mock_backend):
     await _dispatch("delete_edge", {"id": "99"})
     mock_backend.delete.assert_called_once_with("/api/v1/edges/99")
@@ -162,6 +177,21 @@ async def test_get_canvas_keeps_documentation_fields(mock_backend):
     assert node["properties"] == [{"name": "rack", "value": "A1"}]
 
 
+@pytest.mark.anyio
+async def test_get_canvas_with_design_id(mock_backend):
+    mock_backend.get = AsyncMock(return_value={"nodes": [], "edges": []})
+    await _dispatch("get_canvas", {"design_id": "design-2"})
+    mock_backend.get.assert_called_once_with("/api/v1/canvas?design_id=design-2")
+
+
+@pytest.mark.anyio
+async def test_get_canvas_without_design_id_uses_default(mock_backend):
+    # Backward compatible: no design_id -> unqualified canvas endpoint (first design).
+    mock_backend.get = AsyncMock(return_value={"nodes": [], "edges": []})
+    await _dispatch("get_canvas", {})
+    mock_backend.get.assert_called_once_with("/api/v1/canvas")
+
+
 def _tool_schema(name: str) -> dict:
     tool = next(t for t in TOOLS if t.name == name)
     return tool.inputSchema["properties"]
@@ -182,6 +212,19 @@ def test_update_node_schema_exposes_full_node_fields():
     assert "id" in props
 
 
+def test_design_id_exposed_on_canvas_targeting_tools():
+    # create_node/create_edge/get_canvas can target a specific canvas.
+    assert "design_id" in _tool_schema("create_node")
+    assert "design_id" in _tool_schema("create_edge")
+    assert "design_id" in _tool_schema("get_canvas")
+
+
+def test_update_node_schema_has_no_design_id():
+    # The backend NodeUpdate schema can't move a node between designs, so the
+    # update_node tool must not advertise design_id.
+    assert "design_id" not in _tool_schema("update_node")
+
+
 @pytest.mark.anyio
 async def test_list_nodes(mock_backend):
     mock_backend.get = AsyncMock(return_value=[{"id": "1", "label": "Freebox"}])
@@ -196,6 +239,27 @@ async def test_list_pending_devices(mock_backend):
     result = await _dispatch("list_pending_devices", {})
     mock_backend.get.assert_called_once_with("/api/v1/scan/pending")
     assert result == [{"id": "p1", "ip": "192.168.1.50"}]
+
+
+@pytest.mark.anyio
+async def test_list_designs(mock_backend):
+    mock_backend.get = AsyncMock(return_value=[{"id": "d1", "name": "Network Topology", "node_count": 12}])
+    result = await _dispatch("list_designs", {})
+    mock_backend.get.assert_called_once_with("/api/v1/designs")
+    assert result == [{"id": "d1", "name": "Network Topology", "node_count": 12}]
+
+
+@pytest.mark.anyio
+async def test_create_design(mock_backend):
+    mock_backend.post = AsyncMock(return_value={"id": "d2", "name": "Scan Devices"})
+    result = await _dispatch("create_design", {"name": "Scan Devices"})
+    mock_backend.post.assert_called_once_with("/api/v1/designs", {"name": "Scan Devices"})
+    assert result == {"id": "d2", "name": "Scan Devices"}
+
+
+def test_create_design_schema_requires_name():
+    tool = next(t for t in TOOLS if t.name == "create_design")
+    assert tool.inputSchema["required"] == ["name"]
 
 
 @pytest.mark.anyio

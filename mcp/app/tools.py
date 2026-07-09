@@ -21,6 +21,10 @@ _NODE_FIELDS = {
     "check_target":  {"type": "string", "description": "Target host/URL used by the status check."},
     "services":      {"type": "array", "items": {"type": "object"}, "description": "Running services detected or documented on the node."},
     "notes":         {"type": "string", "description": "Free-text notes / documentation for the node."},
+    "pos_x":         {"type": "number", "description": "X position on the canvas. Omit on create to auto-place (root nodes only)."},
+    "pos_y":         {"type": "number", "description": "Y position on the canvas. Omit on create to auto-place (root nodes only). For child nodes this is relative to the parent container."},
+    "width":         {"type": "number", "description": "Width of the node card in pixels. Mainly useful for container nodes."},
+    "height":        {"type": "number", "description": "Height of the node card in pixels. Mainly useful for container nodes."},
     "parent_id":     {"type": "string", "description": "ID of the parent node (e.g. Proxmox host for a VM/LXC). Pass null to detach."},
     "container_mode": {"type": "boolean", "description": "Render this node as a container/group that can hold children."},
     "custom_icon":   {"type": "string", "description": "Override icon name for the node."},
@@ -43,11 +47,20 @@ _NODE_FIELDS = {
     },
 }
 
+# Optional design/canvas selector. The backend attaches nodes/edges to the first
+# design when design_id is omitted (see backend nodes.py / edges.py), so these
+# tools stay backward compatible; pass design_id to target a specific canvas.
+# Use list_designs to discover the available IDs.
+_DESIGN_ID_FIELD = {
+    "design_id": {"type": "string", "description": "Target design/canvas ID. Omit to use the default (first) canvas; call list_designs to discover IDs."},
+}
+
 
 def _build_tools() -> list[Tool]:
     create_node_props = {
         "type": {"type": "string", "enum": NODE_TYPES},
         **_NODE_FIELDS,
+        **_DESIGN_ID_FIELD,
     }
     create_node_props["status"] = {**_NODE_FIELDS["status"], "default": "unknown"}
 
@@ -81,6 +94,7 @@ def _build_tools() -> list[Tool]:
                 "target": {"type": "string"},
                 "type":   {"type": "string", "enum": ["ethernet", "wifi", "iot", "vlan", "virtual"], "default": "ethernet"},
                 "label":  {"type": "string"},
+                **_DESIGN_ID_FIELD,
             },
         }),
         Tool(name="delete_edge", description="Delete a network link", inputSchema={
@@ -110,7 +124,7 @@ def _build_tools() -> list[Tool]:
         }),
         Tool(name="get_canvas", description="Get the full canvas: all nodes and edges in the homelab topology", inputSchema={
             "type": "object",
-            "properties": {},
+            "properties": {**_DESIGN_ID_FIELD},
         }),
         Tool(name="list_nodes", description="List all nodes (devices) in the homelab", inputSchema={
             "type": "object",
@@ -119,6 +133,19 @@ def _build_tools() -> list[Tool]:
         Tool(name="list_pending_devices", description="List devices discovered by scan but not yet approved or hidden", inputSchema={
             "type": "object",
             "properties": {},
+        }),
+        Tool(name="list_designs", description="List all designs (canvases) with their IDs and node/group/text counts", inputSchema={
+            "type": "object",
+            "properties": {},
+        }),
+        Tool(name="create_design", description="Create a new design (canvas) and return it, including its id for use as design_id", inputSchema={
+            "type": "object",
+            "required": ["name"],
+            "properties": {
+                "name":        {"type": "string", "description": "Name of the new canvas."},
+                "icon":        {"type": "string", "description": "Icon name for the canvas (default: dashboard)."},
+                "design_type": {"type": "string", "description": "Design type (default: network)."},
+            },
         }),
     ]
 
@@ -192,7 +219,9 @@ async def _dispatch(name: str, args: dict) -> dict:
         return await backend.post(f"/api/v1/scan/pending/{args['id']}/hide", {})
 
     if name == "get_canvas":
-        raw = await backend.get("/api/v1/canvas")
+        design_id = args.get("design_id")
+        path = f"/api/v1/canvas?design_id={design_id}" if design_id else "/api/v1/canvas"
+        raw = await backend.get(path)
         return _slim_canvas(raw)
 
     if name == "list_nodes":
@@ -200,5 +229,11 @@ async def _dispatch(name: str, args: dict) -> dict:
 
     if name == "list_pending_devices":
         return await backend.get("/api/v1/scan/pending")
+
+    if name == "list_designs":
+        return await backend.get("/api/v1/designs")
+
+    if name == "create_design":
+        return await backend.post("/api/v1/designs", args)
 
     raise ValueError(f"Unknown tool: {name}")

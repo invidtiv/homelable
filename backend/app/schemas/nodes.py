@@ -38,6 +38,10 @@ class NodeBase(BaseModel):
 
 
 class NodeCreate(NodeBase):
+    # Override pos_x/pos_y so callers can omit them; None signals "auto-place".
+    # The create_node route resolves None to a free grid slot before persisting.
+    pos_x: float | None = None  # type: ignore[assignment]
+    pos_y: float | None = None  # type: ignore[assignment]
     design_id: str | None = None
     # When a node with the same ip/mac already exists on the target design, the
     # create/approve endpoints reject with 409 so the UI can ask the user. Set
