@@ -115,6 +115,7 @@ def _build_tools() -> list[Tool]:
                 "id":    {"type": "string"},
                 "type":  {"type": "string", "enum": NODE_TYPES, "default": "generic"},
                 "label": {"type": "string"},
+                **_DESIGN_ID_FIELD,
             },
         }),
         Tool(name="hide_device", description="Hide a pending discovered device", inputSchema={
