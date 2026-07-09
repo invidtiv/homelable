@@ -27,6 +27,17 @@ _ZIGBEE_TYPES = {"zigbee_coordinator", "zigbee_router", "zigbee_enddevice"}
 _ZWAVE_TYPES = {"zwave_coordinator", "zwave_router", "zwave_enddevice"}
 
 
+def _ip_tokens(ip: str | None) -> list[str]:
+    """Split a Node/device ``ip`` field into individual addresses.
+
+    The canvas stores multiple addresses in one comma-separated string (e.g.
+    ``"fe80::1, 192.168.1.5"`` once a user adds an IPv6 address). Matching a
+    scanned device against that field must compare per-address, not against the
+    whole string, or the device looks absent from the canvas (issue #258).
+    """
+    return [t.strip() for t in ip.split(",") if t.strip()] if ip else []
+
+
 def _is_wireless(node_type: str | None) -> bool:
     """Zigbee + Z-Wave mesh devices share online status / no ICMP check."""
     return node_type in _ZIGBEE_TYPES or node_type in _ZWAVE_TYPES
@@ -215,12 +226,18 @@ def _agg(values: list[datetime], *, newest: bool) -> datetime | None:
 async def _canvas_correlation(
     db: AsyncSession, devices: list[PendingDevice]
 ) -> dict[str, dict[str, Any]]:
-    """Correlate each device to existing canvas nodes by ``ieee_address`` or ``ip``.
+    """Correlate each device to existing canvas nodes by ``ieee_address``, ``mac``
+    or ``ip``.
 
     Returns, per device id: the number of distinct canvases (designs) it appears
     on, plus aggregated timestamps from every matching node — created_at (oldest),
     last_scan / updated_at / last_seen (newest). One node query, grouped in Python
     (node counts are small for a homelab), so no N+1 per device.
+
+    IP matching is per-address: a node's ``ip`` may hold several comma-separated
+    addresses (e.g. an IPv6 added before the IPv4), so we index each token, not
+    the raw string. MAC is a stable identifier immune to such IP edits, so it is
+    matched too — cumulatively with ieee/ip (issue #258).
     """
     if not devices:
         return {}
@@ -228,6 +245,7 @@ async def _canvas_correlation(
         await db.execute(
             select(
                 Node.ip,
+                Node.mac,
                 Node.ieee_address,
                 Node.design_id,
                 Node.created_at,
@@ -237,12 +255,15 @@ async def _canvas_correlation(
             ).where(Node.design_id.isnot(None))
         )
     ).all()
-    # Index matching nodes by ip and by ieee so a device can look up both.
+    # Index matching nodes by ip token, mac and ieee so a device can look up any.
     by_ip: dict[str, list[Any]] = {}
+    by_mac: dict[str, list[Any]] = {}
     by_ieee: dict[str, list[Any]] = {}
     for row in rows:
-        if row.ip:
-            by_ip.setdefault(row.ip, []).append(row)
+        for tok in _ip_tokens(row.ip):
+            by_ip.setdefault(tok, []).append(row)
+        if row.mac:
+            by_mac.setdefault(row.mac, []).append(row)
         if row.ieee_address:
             by_ieee.setdefault(row.ieee_address, []).append(row)
 
@@ -251,9 +272,11 @@ async def _canvas_correlation(
         matched = []
         if d.ieee_address:
             matched += by_ieee.get(d.ieee_address, [])
-        if d.ip:
-            matched += by_ip.get(d.ip, [])
-        # De-duplicate nodes matched by both ip and ieee.
+        if d.mac:
+            matched += by_mac.get(d.mac, [])
+        for tok in _ip_tokens(d.ip):
+            matched += by_ip.get(tok, [])
+        # De-duplicate nodes matched by more than one identifier.
         matched = list({id(m): m for m in matched}.values())
         designs = {m.design_id for m in matched}
         info[d.id] = {
@@ -335,17 +358,24 @@ async def bulk_approve_devices(
     devices = result.scalars().all()
 
     # What already sits on the target canvas, so we skip devices already placed
-    # here (by ip or ieee_address) instead of creating duplicate nodes. We map to
-    # the existing node id so the skip report can point the user at it. A value
-    # may be a Node still pending flush (in-batch duplicate) — resolved to its id
-    # after the flush below.
+    # here (by ip, mac or ieee_address) instead of creating duplicate nodes. We
+    # map to the existing node id so the skip report can point the user at it. A
+    # value may be a Node still pending flush (in-batch duplicate) — resolved to
+    # its id after the flush below. IPs are indexed per comma-separated token so
+    # a node whose ip is "fe80::1, 192.168.1.5" still matches a device scanned as
+    # 192.168.1.5 (issue #258).
     existing = (
         await db.execute(
-            select(Node.id, Node.ip, Node.ieee_address).where(Node.design_id == default_design_id)
+            select(Node.id, Node.ip, Node.mac, Node.ieee_address).where(
+                Node.design_id == default_design_id
+            )
         )
     ).all()
-    placed_ips: dict[str, Any] = {ip: nid for nid, ip, _ in existing if ip}
-    placed_ieee: dict[str, Any] = {ieee: nid for nid, _, ieee in existing if ieee}
+    placed_ips: dict[str, Any] = {
+        tok: nid for nid, ip, _, _ in existing for tok in _ip_tokens(ip)
+    }
+    placed_mac: dict[str, Any] = {mac: nid for nid, _, mac, _ in existing if mac}
+    placed_ieee: dict[str, Any] = {ieee: nid for nid, _, _, ieee in existing if ieee}
 
     created_nodes: list[Node] = []
     approved_devices: list[PendingDevice] = []
@@ -353,11 +383,12 @@ async def bulk_approve_devices(
     for device in devices:
         # Record which identifier collided so the caller can explain each skip
         # (and, for existing on-canvas nodes, link to the node already there).
-        if device.ip is not None and device.ip in placed_ips:
+        ip_hit = next((t for t in _ip_tokens(device.ip) if t in placed_ips), None)
+        if ip_hit is not None:
             skipped_devices.append({
                 "device_id": device.id,
                 "label": device.hostname or device.friendly_name or device.ip or "device",
-                "match": "ip", "value": device.ip, "_ref": placed_ips[device.ip],
+                "match": "ip", "value": ip_hit, "_ref": placed_ips[ip_hit],
             })
             continue
         if device.ieee_address is not None and device.ieee_address in placed_ieee:
@@ -365,6 +396,13 @@ async def bulk_approve_devices(
                 "device_id": device.id,
                 "label": device.hostname or device.friendly_name or device.ieee_address or "device",
                 "match": "ieee", "value": device.ieee_address, "_ref": placed_ieee[device.ieee_address],
+            })
+            continue
+        if device.mac is not None and device.mac in placed_mac:
+            skipped_devices.append({
+                "device_id": device.id,
+                "label": device.hostname or device.friendly_name or device.mac or "device",
+                "match": "mac", "value": device.mac, "_ref": placed_mac[device.mac],
             })
             continue
         device.status = "approved"
@@ -394,11 +432,13 @@ async def bulk_approve_devices(
         db.add(node)
         created_nodes.append(node)
         approved_devices.append(device)
-        # Track within this batch so a duplicate selection (same ip/ieee) is not
-        # placed twice on the same canvas. Store the Node so a later in-batch
+        # Track within this batch so a duplicate selection (same ip/mac/ieee) is
+        # not placed twice on the same canvas. Store the Node so a later in-batch
         # skip can resolve to its id after flush.
-        if device.ip:
-            placed_ips[device.ip] = node
+        for tok in _ip_tokens(device.ip):
+            placed_ips[tok] = node
+        if device.mac:
+            placed_mac[device.mac] = node
         if device.ieee_address:
             placed_ieee[device.ieee_address] = node
     await db.flush()  # populates node.id from Python-side default before reading
