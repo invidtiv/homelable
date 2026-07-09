@@ -250,6 +250,19 @@ async def test_list_designs(mock_backend):
 
 
 @pytest.mark.anyio
+async def test_create_design(mock_backend):
+    mock_backend.post = AsyncMock(return_value={"id": "d2", "name": "Scan Devices"})
+    result = await _dispatch("create_design", {"name": "Scan Devices"})
+    mock_backend.post.assert_called_once_with("/api/v1/designs", {"name": "Scan Devices"})
+    assert result == {"id": "d2", "name": "Scan Devices"}
+
+
+def test_create_design_schema_requires_name():
+    tool = next(t for t in TOOLS if t.name == "create_design")
+    assert tool.inputSchema["required"] == ["name"]
+
+
+@pytest.mark.anyio
 async def test_unknown_tool():
     with pytest.raises(ValueError, match="Unknown tool"):
         await _dispatch("nonexistent", {})

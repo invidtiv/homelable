@@ -134,6 +134,15 @@ def _build_tools() -> list[Tool]:
             "type": "object",
             "properties": {},
         }),
+        Tool(name="create_design", description="Create a new design (canvas) and return it, including its id for use as design_id", inputSchema={
+            "type": "object",
+            "required": ["name"],
+            "properties": {
+                "name":        {"type": "string", "description": "Name of the new canvas."},
+                "icon":        {"type": "string", "description": "Icon name for the canvas (default: dashboard)."},
+                "design_type": {"type": "string", "description": "Design type (default: network)."},
+            },
+        }),
     ]
 
 
@@ -219,5 +228,8 @@ async def _dispatch(name: str, args: dict) -> dict:
 
     if name == "list_designs":
         return await backend.get("/api/v1/designs")
+
+    if name == "create_design":
+        return await backend.post("/api/v1/designs", args)
 
     raise ValueError(f"Unknown tool: {name}")
