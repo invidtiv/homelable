@@ -15,7 +15,7 @@ from app.db.database import AsyncSessionLocal, get_db
 from app.db.models import Design, Edge, Node, PendingDevice, PendingDeviceLink, ScanRun
 from app.schemas.nodes import NodeCreate
 from app.schemas.scan import PendingDeviceResponse, ScanRunResponse
-from app.services.node_dedupe import dedupe_nodes_by_ieee
+from app.services.node_dedupe import dedupe_nodes_by_ieee, find_duplicate_node
 from app.services.scanner import DeepScanOptions, _valid_port_range, request_cancel, run_scan
 from app.services.zigbee_service import (
     build_zigbee_properties,
@@ -335,23 +335,37 @@ async def bulk_approve_devices(
     devices = result.scalars().all()
 
     # What already sits on the target canvas, so we skip devices already placed
-    # here (by ip or ieee_address) instead of creating duplicate nodes.
+    # here (by ip or ieee_address) instead of creating duplicate nodes. We map to
+    # the existing node id so the skip report can point the user at it. A value
+    # may be a Node still pending flush (in-batch duplicate) — resolved to its id
+    # after the flush below.
     existing = (
         await db.execute(
-            select(Node.ip, Node.ieee_address).where(Node.design_id == default_design_id)
+            select(Node.id, Node.ip, Node.ieee_address).where(Node.design_id == default_design_id)
         )
     ).all()
-    placed_ips = {ip for ip, _ in existing if ip}
-    placed_ieee = {ieee for _, ieee in existing if ieee}
+    placed_ips: dict[str, Any] = {ip: nid for nid, ip, _ in existing if ip}
+    placed_ieee: dict[str, Any] = {ieee: nid for nid, _, ieee in existing if ieee}
 
     created_nodes: list[Node] = []
     approved_devices: list[PendingDevice] = []
+    skipped_devices: list[dict[str, Any]] = []
     for device in devices:
-        already_here = (
-            (device.ip is not None and device.ip in placed_ips)
-            or (device.ieee_address is not None and device.ieee_address in placed_ieee)
-        )
-        if already_here:
+        # Record which identifier collided so the caller can explain each skip
+        # (and, for existing on-canvas nodes, link to the node already there).
+        if device.ip is not None and device.ip in placed_ips:
+            skipped_devices.append({
+                "device_id": device.id,
+                "label": device.hostname or device.friendly_name or device.ip or "device",
+                "match": "ip", "value": device.ip, "_ref": placed_ips[device.ip],
+            })
+            continue
+        if device.ieee_address is not None and device.ieee_address in placed_ieee:
+            skipped_devices.append({
+                "device_id": device.id,
+                "label": device.hostname or device.friendly_name or device.ieee_address or "device",
+                "match": "ieee", "value": device.ieee_address, "_ref": placed_ieee[device.ieee_address],
+            })
             continue
         device.status = "approved"
         node_type = device.suggested_type or "generic"
@@ -381,15 +395,22 @@ async def bulk_approve_devices(
         created_nodes.append(node)
         approved_devices.append(device)
         # Track within this batch so a duplicate selection (same ip/ieee) is not
-        # placed twice on the same canvas.
+        # placed twice on the same canvas. Store the Node so a later in-batch
+        # skip can resolve to its id after flush.
         if device.ip:
-            placed_ips.add(device.ip)
+            placed_ips[device.ip] = node
         if device.ieee_address:
-            placed_ieee.add(device.ieee_address)
+            placed_ieee[device.ieee_address] = node
     await db.flush()  # populates node.id from Python-side default before reading
     # node_ids and approved_device_ids stay index-aligned for the client's mapping.
     node_ids = [n.id for n in created_nodes]
     approved_device_ids = [d.id for d in approved_devices]
+
+    # Resolve each skip's existing-node reference to a concrete id now that any
+    # in-batch nodes have been flushed, and expose it under a clean key.
+    for entry in skipped_devices:
+        ref = entry.pop("_ref")
+        entry["existing_node_id"] = ref.id if isinstance(ref, Node) else ref
 
     all_edges: list[dict[str, str]] = []
     for device in approved_devices:
@@ -405,6 +426,7 @@ async def bulk_approve_devices(
         "edges_created": len(all_edges),
         "edges": all_edges,
         "skipped": len(payload.device_ids) - len(node_ids),
+        "skipped_devices": skipped_devices,
     }
 
 
@@ -478,41 +500,35 @@ async def approve_device(
     device = await db.get(PendingDevice, device_id)
     if not device:
         raise HTTPException(status_code=404, detail="Device not found")
-    if device.status != "pending":
-        raise HTTPException(status_code=409, detail="Device already processed")
-    device.status = "approved"
+    # A device's status is GLOBAL — it flips to "approved" the moment it lands on
+    # ANY canvas — but canvas membership is per-design. Approving onto a NEW
+    # design must therefore work even when the device already sits on another
+    # one (mirroring bulk_approve_devices, which deliberately does not filter on
+    # status == "pending"). Same-design duplicates are caught by the per-design
+    # IEEE/ip/mac guards below, not by this global flag. Only a user-hidden
+    # device is off-limits here.
+    if device.status == "hidden":
+        raise HTTPException(status_code=409, detail="Device is hidden")
     wireless = _is_wireless(node_data.type)
 
-    # Guard against a true duplicate: same IEEE already placed on THIS design.
-    # (The same device on a *different* design is valid — one Node per canvas.)
-    if device.ieee_address is not None:
-        dup = (
-            await db.execute(
-                select(Node).where(
-                    Node.ieee_address == device.ieee_address,
-                    Node.design_id == node_design_id,
-                )
-            )
-        ).scalars().first()
-        if dup is not None:
-            dup.properties = merge_zigbee_properties(
-                dup.properties,
-                _wireless_properties(
-                    node_data.type, device.ieee_address,
-                    device.vendor, device.model, device.lqi,
-                ) if wireless else [],
-            )
-            edges = await _resolve_pending_links_for_ieee(
-                db, device.ieee_address, node_design_id
-            )
-            await db.commit()
-            return {
-                "approved": True,
-                "node_id": dup.id,
-                "edges_created": len(edges),
-                "edges": edges,
-            }
+    # A device already on THIS design (matched by ieee, ip OR mac) is NOT placed
+    # again automatically: the user might genuinely want a second card, or might
+    # be re-approving by mistake. Reject with 409 + the existing node so the UI
+    # can ask — identical handling for IEEE (Zigbee/Z-Wave) and plain IP/ARP
+    # hosts. force=True (set after the user confirms) skips this and creates it.
+    # The same device on a *different* design is valid (one Node per canvas), so
+    # this is scoped to node_design_id.
+    if not node_data.force:
+        conflict = await find_duplicate_node(
+            db, node_design_id,
+            node_data.ip or device.ip,
+            node_data.mac or device.mac,
+            ieee=device.ieee_address,
+        )
+        if conflict is not None:
+            raise HTTPException(status_code=409, detail=conflict)
 
+    device.status = "approved"
     # Prefer the MAC discovered during the scan (stored on the pending device);
     # fall back to whatever the approve payload carried.
     _mac = device.mac or node_data.mac

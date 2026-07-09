@@ -77,6 +77,26 @@ export interface DeepScanConfig {
 
 export type ScanConfigData = { ranges: string[] } & DeepScanConfig
 
+// A device the backend refused to place because an equivalent node already
+// exists on the target design (same ip/mac/ieee). `existing_node_id` points at
+// the node already there so the UI can link to it.
+export interface SkippedDevice {
+  device_id: string
+  label: string
+  match: 'ip' | 'mac' | 'ieee'
+  value: string
+  existing_node_id: string | null
+}
+
+// 409 body from single approve / create when a same-design duplicate is found.
+export interface DuplicateNodeConflict {
+  duplicate: true
+  existing_node_id: string
+  existing_label: string
+  match: 'ip' | 'mac' | 'ieee'
+  value: string
+}
+
 export const scanApi = {
   trigger: (deepScan?: Partial<DeepScanConfig>) => api.post('/scan/trigger', deepScan ?? {}),
   pending: () => api.get('/scan/pending'),
@@ -100,6 +120,7 @@ export const scanApi = {
       edges_created: number
       edges: { id: string; source: string; target: string; type?: string; source_handle?: string | null; target_handle?: string | null }[]
       skipped: number
+      skipped_devices: SkippedDevice[]
     }>('/scan/pending/bulk-approve', { device_ids: ids, design_id: designId ?? undefined }),
   bulkHide: (ids: string[]) => api.post<{ hidden: number; skipped: number }>('/scan/pending/bulk-hide', { device_ids: ids }),
   restore: (id: string) => api.post<{ restored: boolean; device_id: string }>(`/scan/pending/${id}/restore`),

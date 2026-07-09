@@ -6,6 +6,7 @@ from app.api.deps import get_current_user
 from app.db.database import get_db
 from app.db.models import Design, Node
 from app.schemas.nodes import NodeCreate, NodeResponse, NodeUpdate
+from app.services.node_dedupe import find_duplicate_node
 
 router = APIRouter()
 
@@ -19,6 +20,8 @@ async def list_nodes(db: AsyncSession = Depends(get_db), _: str = Depends(get_cu
 @router.post("", response_model=NodeResponse, status_code=status.HTTP_201_CREATED)
 async def create_node(body: NodeCreate, db: AsyncSession = Depends(get_db), _: str = Depends(get_current_user)) -> Node:
     data = body.model_dump()
+    # `force` bypasses the duplicate guard below; it is not a Node column.
+    force = data.pop("force", False)
     # Attach to a design so the node lands on a canvas. Clients that don't send a
     # design_id (e.g. the MCP write tools) would otherwise create design_id=null
     # nodes that exist in the DB but never render in the UI until a container
@@ -26,6 +29,15 @@ async def create_node(body: NodeCreate, db: AsyncSession = Depends(get_db), _: s
     if data.get("design_id") is None:
         first_design = (await db.execute(select(Design).order_by(Design.created_at).limit(1))).scalar()
         data["design_id"] = first_design.id if first_design else None
+
+    # Reject a silent duplicate: a node with the same ip OR mac already on the
+    # target design. Scripts/MCP clients get a clear 409 (with the existing id)
+    # instead of a second card for the same host. Pass force=True to override.
+    if not force:
+        dup = await find_duplicate_node(db, data["design_id"], data.get("ip"), data.get("mac"))
+        if dup is not None:
+            raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail=dup)
+
     node = Node(**data)
     db.add(node)
     await db.commit()
