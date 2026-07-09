@@ -181,12 +181,36 @@ async def _add_design(db_session, name: str) -> str:
     return design.id
 
 
-def _node(design_id: str, *, ip=None, ieee=None) -> Node:
+def _node(design_id: str, *, ip=None, ieee=None, mac=None) -> Node:
     return Node(
         id=str(uuid.uuid4()), label="n", type="server", status="online",
-        ip=ip, ieee_address=ieee, services=[], pos_x=0.0, pos_y=0.0,
+        ip=ip, mac=mac, ieee_address=ieee, services=[], pos_x=0.0, pos_y=0.0,
         design_id=design_id,
     )
+
+
+@pytest.mark.asyncio
+async def test_canvas_count_matches_ip_in_comma_list(client, headers, db_session, pending_device):
+    # Node.ip holds several comma-separated addresses (IPv6 added first). The
+    # device scanned as the plain IPv4 must still correlate (issue #258).
+    d1 = await _add_design(db_session, "Home")
+    db_session.add(_node(d1, ip="fe80::1, 192.168.1.100"))
+    await db_session.commit()
+
+    data = (await client.get("/api/v1/scan/pending", headers=headers)).json()
+    assert data[0]["canvas_count"] == 1
+
+
+@pytest.mark.asyncio
+async def test_canvas_count_correlates_by_mac(client, headers, db_session, pending_device):
+    # Node's ip differs entirely (user edited it) but the MAC still matches:
+    # the device is on the canvas (issue #258, MAC is the stable identifier).
+    d1 = await _add_design(db_session, "Home")
+    db_session.add(_node(d1, ip="10.9.9.9", mac="aa:bb:cc:dd:ee:ff"))
+    await db_session.commit()
+
+    data = (await client.get("/api/v1/scan/pending", headers=headers)).json()
+    assert data[0]["canvas_count"] == 1
 
 
 @pytest.mark.asyncio
@@ -441,6 +465,50 @@ async def test_approve_device_conflicts_on_existing_mac(
     )
     assert res.status_code == 409
     assert res.json()["detail"]["match"] == "mac"
+
+
+@pytest.mark.asyncio
+async def test_approve_device_conflicts_on_ip_in_comma_list(
+    client: AsyncClient, headers, db_session, pending_device
+):
+    """The existing node's ip holds an IPv6 before the IPv4 the device scanned
+    as. Exact-string matching missed it (issue #258); per-token matching catches
+    the duplicate."""
+    design = await _add_design(db_session, "Home")
+    existing = _node(design, ip="fe80::1, 192.168.1.100")
+    db_session.add(existing)
+    await db_session.commit()
+
+    res = await client.post(
+        f"/api/v1/scan/pending/{pending_device.id}/approve",
+        json={"label": "dup", "type": "server", "ip": "192.168.1.100",
+              "status": "unknown", "services": [], "design_id": design},
+        headers=headers,
+    )
+    assert res.status_code == 409
+    detail = res.json()["detail"]
+    assert detail["existing_node_id"] == existing.id
+    assert detail["match"] == "ip"
+    assert detail["value"] == "192.168.1.100"
+
+
+@pytest.mark.asyncio
+async def test_approve_device_no_conflict_on_ip_substring(
+    client: AsyncClient, headers, db_session, pending_device
+):
+    """The ip guard must match whole addresses, not substrings: a node at
+    10.0.0.40 is not a duplicate of a device at 10.0.0.4."""
+    design = await _add_design(db_session, "Home")
+    db_session.add(_node(design, ip="10.0.0.40"))
+    await db_session.commit()
+
+    res = await client.post(
+        f"/api/v1/scan/pending/{pending_device.id}/approve",
+        json={"label": "new", "type": "server", "ip": "10.0.0.4",
+              "mac": None, "status": "unknown", "services": [], "design_id": design},
+        headers=headers,
+    )
+    assert res.status_code == 200
 
 
 @pytest.mark.asyncio
@@ -1083,6 +1151,28 @@ async def test_bulk_approve_skips_device_already_on_target_design(
     # The pre-existing node plus the one newly approved — no duplicate for .10.
     assert len(nodes) == 2
     assert sorted(n.ip for n in nodes) == ["192.168.1.10", "192.168.1.11"]
+
+
+@pytest.mark.asyncio
+async def test_bulk_approve_skips_device_matching_ip_in_comma_list(
+    client: AsyncClient, headers, db_session, two_pending_devices
+):
+    """The on-canvas node's ip holds an IPv6 before the IPv4; the device scanned
+    as the plain IPv4 is still recognised as already placed (issue #258)."""
+    ids = [d.id for d in two_pending_devices]
+    design = await _add_design(db_session, "Canvas")
+    db_session.add(_node(design, ip="fe80::1, 192.168.1.10"))
+    await db_session.commit()
+
+    res = await client.post(
+        "/api/v1/scan/pending/bulk-approve",
+        json={"device_ids": ids, "design_id": design},
+        headers=headers,
+    )
+    data = res.json()
+    assert data["approved"] == 1   # only the second device (192.168.1.11)
+    assert data["skipped"] == 1
+    assert data["skipped_devices"][0]["value"] == "192.168.1.10"
 
 
 @pytest.mark.asyncio

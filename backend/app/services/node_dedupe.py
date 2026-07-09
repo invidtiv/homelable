@@ -29,6 +29,15 @@ from app.services.zigbee_service import merge_zigbee_properties
 logger = logging.getLogger(__name__)
 
 
+def _ip_tokens(ip: str | None) -> list[str]:
+    """Split a Node ``ip`` field into individual, whitespace-trimmed addresses.
+
+    The canvas stores several addresses in one comma-separated string once a
+    user adds e.g. an IPv6 address, so identity matching must compare per token.
+    """
+    return [t.strip() for t in ip.split(",") if t.strip()] if ip else []
+
+
 async def find_duplicate_node(
     db: AsyncSession,
     design_id: str | None,
@@ -49,31 +58,48 @@ async def find_duplicate_node(
     (:func:`dedupe_nodes_by_ieee` still repairs *pre-existing* same-canvas IEEE
     duplicates; this guard prevents new ones unless the user forces them.)
     """
+    ip_toks = _ip_tokens(ip)
     conds = []
     if ieee:
         conds.append(Node.ieee_address == ieee)
-    if ip:
-        conds.append(Node.ip == ip)
+    # A node's ip may hold several comma-separated addresses (e.g. an IPv6 added
+    # before the IPv4), so narrow with a substring match then confirm per-token
+    # in Python — exact ``Node.ip == ip`` would miss those rows (issue #258).
+    for tok in ip_toks:
+        conds.append(Node.ip.contains(tok))
     if mac:
         conds.append(Node.mac == mac)
     if not conds:
         return None
-    existing = (
+    candidates = (
         await db.execute(
             select(Node).where(Node.design_id == design_id, or_(*conds))
         )
-    ).scalars().first()
-    if existing is None:
+    ).scalars().all()
+
+    # Confirm a real match (the ip ``contains`` above can false-positive, e.g.
+    # "1.2.3.4" inside "1.2.3.40"), preferring ieee > ip > mac.
+    def _matches(node: Node) -> tuple[str, str | None] | None:
+        if ieee and node.ieee_address == ieee:
+            return "ieee", node.ieee_address
+        node_toks = set(_ip_tokens(node.ip))
+        hit = next((t for t in ip_toks if t in node_toks), None)
+        if hit is not None:
+            return "ip", hit
+        if mac and node.mac == mac:
+            return "mac", mac
         return None
-    # Report whichever field actually matched (ieee > ip > mac when several do).
-    match: str
-    value: str | None
-    if ieee and existing.ieee_address == ieee:
-        match, value = "ieee", existing.ieee_address
-    elif ip and existing.ip == ip:
-        match, value = "ip", existing.ip
-    else:
-        match, value = "mac", existing.mac
+
+    existing = None
+    matched: tuple[str, str | None] | None = None
+    for node in candidates:
+        m = _matches(node)
+        if m is not None:
+            existing, matched = node, m
+            break
+    if existing is None or matched is None:
+        return None
+    match, value = matched
     return {
         "duplicate": True,
         "existing_node_id": existing.id,
