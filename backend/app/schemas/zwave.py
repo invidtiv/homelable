@@ -83,3 +83,30 @@ class ZwaveImportPendingResponse(BaseModel):
     coordinator_already_existed: bool = False
     links_recorded: int
     device_count: int
+
+
+class ZwaveConfig(BaseModel):
+    """Non-secret Z-Wave connection + auto-sync config (GET response).
+
+    MQTT connection fields (host/port/prefix/gateway_name/tls) are env-only and
+    read-only here — surfaced for display. ``host_configured`` reflects whether
+    a server-side MQTT host is set (required for auto-sync). MQTT credentials
+    (username/password) are never carried."""
+
+    mqtt_host: str = ""
+    mqtt_port: int = Field(1883, ge=1, le=65535)
+    prefix: str = "zwave"
+    gateway_name: str = "zwavejs2mqtt"
+    mqtt_tls: bool = False
+    sync_enabled: bool = False
+    sync_interval: int = Field(3600, ge=300)
+    host_configured: bool = False
+
+
+class ZwaveSyncConfig(BaseModel):
+    """User-editable auto-sync config (POST body). The ONLY persisted Z-Wave
+    settings. Connection fields (host/port/credentials/prefix/gateway/tls) are
+    env-only and are deliberately not accepted here."""
+
+    sync_enabled: bool = False
+    sync_interval: int = Field(3600, ge=300)

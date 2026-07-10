@@ -123,3 +123,47 @@ def test_save_overrides_omits_proxmox_connection_config(tmp_path):
     assert "proxmox_token_secret" not in written
     assert written["proxmox_sync_enabled"] is True
     assert written["proxmox_sync_interval"] == 900
+
+
+def test_mesh_connection_config_is_env_only_never_from_overrides(tmp_path):
+    """Zigbee/Z-Wave MQTT connection config (host/port/credentials/topic/tls) is
+    env-only: stale values in scan_config.json must be ignored. Only the
+    auto-sync activation is read back."""
+    s = Settings(secret_key="x", sqlite_path=str(tmp_path / "homelab.db"))
+    s.zigbee_mqtt_host = "broker.local"
+    s.zwave_mqtt_host = "broker.local"
+    (tmp_path / "scan_config.json").write_text(json.dumps({
+        "zigbee_mqtt_host": "stale", "zigbee_mqtt_password": "stale",
+        "zigbee_sync_enabled": True, "zigbee_sync_interval": 600,
+        "zwave_mqtt_host": "stale", "zwave_mqtt_password": "stale",
+        "zwave_sync_enabled": True, "zwave_sync_interval": 700,
+    }))
+    s.load_overrides()
+    assert s.zigbee_mqtt_host == "broker.local"
+    assert s.zwave_mqtt_host == "broker.local"
+    assert s.zigbee_sync_enabled is True
+    assert s.zigbee_sync_interval == 600
+    assert s.zwave_sync_enabled is True
+    assert s.zwave_sync_interval == 700
+
+
+def test_save_overrides_omits_mesh_credentials(tmp_path):
+    """save_overrides must never write MQTT host/credentials — only the sync
+    activation. Prevents the dual source of truth and leaking secrets to disk."""
+    s = Settings(secret_key="x", sqlite_path=str(tmp_path / "homelab.db"))
+    s.zigbee_mqtt_host = "broker.local"
+    s.zigbee_mqtt_password = "secret"
+    s.zigbee_sync_enabled = True
+    s.zigbee_sync_interval = 900
+    s.zwave_mqtt_password = "secret"
+    s.zwave_sync_interval = 1200
+    s.save_overrides()
+    raw = (tmp_path / "scan_config.json").read_text()
+    assert "secret" not in raw
+    written = json.loads(raw)
+    assert "zigbee_mqtt_host" not in written
+    assert "zigbee_mqtt_password" not in written
+    assert "zwave_mqtt_password" not in written
+    assert written["zigbee_sync_enabled"] is True
+    assert written["zigbee_sync_interval"] == 900
+    assert written["zwave_sync_interval"] == 1200

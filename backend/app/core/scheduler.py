@@ -144,6 +144,54 @@ async def _run_proxmox_sync() -> None:
     )
 
 
+async def _run_mesh_sync(kind: str) -> None:
+    """Shared auto-sync for the MQTT mesh imports (Zigbee / Z-Wave).
+
+    Records a ScanRun (kind=zigbee|zwave) so the scheduled sync shows in Scan
+    history, then delegates to the exact same background import the manual
+    /sync-now and /import-pending paths use. Connection config comes from the
+    server env only (credentials never leave it).
+    """
+    from app.db.models import ScanRun
+
+    if kind == "zigbee":
+        if not settings.zigbee_sync_enabled:
+            return
+        if not settings.zigbee_mqtt_host:
+            logger.warning("Zigbee auto-sync enabled but MQTT host not configured — skipping")
+            return
+        from app.api.routes.zigbee import _background_zigbee_import, env_import_request
+        host, port = settings.zigbee_mqtt_host, settings.zigbee_mqtt_port
+        background = _background_zigbee_import
+    else:
+        if not settings.zwave_sync_enabled:
+            return
+        if not settings.zwave_mqtt_host:
+            logger.warning("Z-Wave auto-sync enabled but MQTT host not configured — skipping")
+            return
+        from app.api.routes.zwave import _background_zwave_import, env_import_request
+        host, port = settings.zwave_mqtt_host, settings.zwave_mqtt_port
+        background = _background_zwave_import
+
+    payload = env_import_request()
+    async with AsyncSessionLocal() as db:
+        run = ScanRun(status="running", kind=kind, ranges=[f"{host}:{port}"])
+        db.add(run)
+        await db.commit()
+        await db.refresh(run)
+        run_id = run.id
+
+    await background(run_id, payload)
+
+
+async def _run_zigbee_sync() -> None:
+    await _run_mesh_sync("zigbee")
+
+
+async def _run_zwave_sync() -> None:
+    await _run_mesh_sync("zwave")
+
+
 def _add_service_check_job() -> None:
     scheduler.add_job(
         _run_service_checks,
@@ -161,6 +209,28 @@ def _add_proxmox_sync_job() -> None:
         "interval",
         seconds=settings.proxmox_sync_interval,
         id="proxmox_sync",
+        max_instances=1,
+        coalesce=True,
+    )
+
+
+def _add_zigbee_sync_job() -> None:
+    scheduler.add_job(
+        _run_zigbee_sync,
+        "interval",
+        seconds=settings.zigbee_sync_interval,
+        id="zigbee_sync",
+        max_instances=1,
+        coalesce=True,
+    )
+
+
+def _add_zwave_sync_job() -> None:
+    scheduler.add_job(
+        _run_zwave_sync,
+        "interval",
+        seconds=settings.zwave_sync_interval,
+        id="zwave_sync",
         max_instances=1,
         coalesce=True,
     )
@@ -186,6 +256,10 @@ def start_scheduler() -> None:
         _add_service_check_job()
     if settings.proxmox_sync_enabled:
         _add_proxmox_sync_job()
+    if settings.zigbee_sync_enabled:
+        _add_zigbee_sync_job()
+    if settings.zwave_sync_enabled:
+        _add_zwave_sync_job()
     scheduler.start()
     logger.info("Scheduler started — status checks every %ds", settings.status_checker_interval)
 
@@ -249,6 +323,56 @@ def set_proxmox_sync_enabled(enabled: bool) -> None:
     elif not enabled and job:
         scheduler.remove_job("proxmox_sync")
         logger.info("Proxmox auto-sync disabled")
+
+
+def reschedule_zigbee_sync(interval_seconds: int) -> None:
+    """Update the Zigbee auto-sync interval on the running scheduler (if enabled)."""
+    if interval_seconds < 300:
+        raise ValueError(f"interval_seconds must be >= 300, got {interval_seconds}")
+    if not scheduler.running:
+        logger.warning("Scheduler not running, skipping reschedule")
+        return
+    if scheduler.get_job("zigbee_sync"):
+        scheduler.reschedule_job("zigbee_sync", trigger="interval", seconds=interval_seconds)
+        logger.info("Zigbee auto-sync rescheduled to every %ds", interval_seconds)
+
+
+def set_zigbee_sync_enabled(enabled: bool) -> None:
+    """Add or remove the Zigbee auto-sync job on the running scheduler."""
+    if not scheduler.running:
+        return
+    job = scheduler.get_job("zigbee_sync")
+    if enabled and not job:
+        _add_zigbee_sync_job()
+        logger.info("Zigbee auto-sync enabled — every %ds", settings.zigbee_sync_interval)
+    elif not enabled and job:
+        scheduler.remove_job("zigbee_sync")
+        logger.info("Zigbee auto-sync disabled")
+
+
+def reschedule_zwave_sync(interval_seconds: int) -> None:
+    """Update the Z-Wave auto-sync interval on the running scheduler (if enabled)."""
+    if interval_seconds < 300:
+        raise ValueError(f"interval_seconds must be >= 300, got {interval_seconds}")
+    if not scheduler.running:
+        logger.warning("Scheduler not running, skipping reschedule")
+        return
+    if scheduler.get_job("zwave_sync"):
+        scheduler.reschedule_job("zwave_sync", trigger="interval", seconds=interval_seconds)
+        logger.info("Z-Wave auto-sync rescheduled to every %ds", interval_seconds)
+
+
+def set_zwave_sync_enabled(enabled: bool) -> None:
+    """Add or remove the Z-Wave auto-sync job on the running scheduler."""
+    if not scheduler.running:
+        return
+    job = scheduler.get_job("zwave_sync")
+    if enabled and not job:
+        _add_zwave_sync_job()
+        logger.info("Z-Wave auto-sync enabled — every %ds", settings.zwave_sync_interval)
+    elif not enabled and job:
+        scheduler.remove_job("zwave_sync")
+        logger.info("Z-Wave auto-sync disabled")
 
 
 def stop_scheduler() -> None:

@@ -10,16 +10,20 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.api.deps import get_current_user
+from app.core.config import settings
+from app.core.scheduler import reschedule_zigbee_sync, set_zigbee_sync_enabled
 from app.db.database import AsyncSessionLocal, get_db
 from app.db.models import Node, PendingDevice, PendingDeviceLink, ScanRun
 from app.schemas.scan import ScanRunResponse
 from app.schemas.zigbee import (
+    ZigbeeConfig,
     ZigbeeCoordinatorOut,
     ZigbeeEdgeOut,
     ZigbeeImportPendingResponse,
     ZigbeeImportRequest,
     ZigbeeImportResponse,
     ZigbeeNodeOut,
+    ZigbeeSyncConfig,
     ZigbeeTestConnectionRequest,
     ZigbeeTestConnectionResponse,
 )
@@ -87,6 +91,53 @@ async def import_zigbee_to_pending(
     modal and surface progress under Scan History (kind=zigbee). The
     actual MQTT fetch + pending upsert happens in the background.
     """
+    run = ScanRun(
+        status="running",
+        kind="zigbee",
+        ranges=[f"{payload.mqtt_host}:{payload.mqtt_port}"],
+    )
+    db.add(run)
+    await db.commit()
+    await db.refresh(run)
+    background_tasks.add_task(_background_zigbee_import, run.id, payload)
+    return run
+
+
+def env_import_request() -> ZigbeeImportRequest:
+    """Build an import request from the server env config (for auto-sync).
+
+    MQTT credentials live in the env only — never in the request body or any
+    API response. The scheduled auto-sync job and ``/sync-now`` both source
+    their connection settings here so there is a single source of truth."""
+    return ZigbeeImportRequest(
+        mqtt_host=settings.zigbee_mqtt_host,
+        mqtt_port=settings.zigbee_mqtt_port,
+        mqtt_username=settings.zigbee_mqtt_username or None,
+        mqtt_password=settings.zigbee_mqtt_password or None,
+        base_topic=settings.zigbee_base_topic,
+        mqtt_tls=settings.zigbee_mqtt_tls,
+        mqtt_tls_insecure=settings.zigbee_mqtt_tls_insecure,
+    )
+
+
+@router.post("/sync-now", response_model=ScanRunResponse)
+async def sync_zigbee_now(
+    background_tasks: BackgroundTasks,
+    db: AsyncSession = Depends(get_db),
+    _: str = Depends(get_current_user),
+) -> ScanRun:
+    """Trigger an immediate Zigbee import using the server env config.
+
+    Same background flow as ``/import-pending`` but sources the MQTT connection
+    from ``settings`` (env) rather than the request body — the manual
+    counterpart to the scheduled auto-sync job. Requires the env host to be set.
+    """
+    if not settings.zigbee_mqtt_host:
+        raise HTTPException(
+            status_code=400,
+            detail="Cannot sync: no Zigbee MQTT host configured on the server.",
+        )
+    payload = env_import_request()
     run = ScanRun(
         status="running",
         kind="zigbee",
@@ -307,3 +358,50 @@ async def test_zigbee_connection(
     except Exception:
         logger.exception("Unexpected error during connection test")
         return ZigbeeTestConnectionResponse(connected=False, message="Unexpected error")
+
+
+@router.get("/config", response_model=ZigbeeConfig)
+async def get_zigbee_config(_: str = Depends(get_current_user)) -> ZigbeeConfig:
+    """Return non-secret Zigbee config. Never includes MQTT credentials — only
+    whether a host is configured on the server for auto-sync."""
+    return ZigbeeConfig(
+        mqtt_host=settings.zigbee_mqtt_host,
+        mqtt_port=settings.zigbee_mqtt_port,
+        base_topic=settings.zigbee_base_topic,
+        mqtt_tls=settings.zigbee_mqtt_tls,
+        sync_enabled=settings.zigbee_sync_enabled,
+        sync_interval=settings.zigbee_sync_interval,
+        host_configured=bool(settings.zigbee_mqtt_host),
+    )
+
+
+@router.post("/config", response_model=ZigbeeConfig)
+async def save_zigbee_config(
+    payload: ZigbeeSyncConfig,
+    _: str = Depends(get_current_user),
+) -> ZigbeeConfig:
+    """Persist the auto-sync activation (enabled + interval) and apply it live.
+
+    This is the ONLY Zigbee config the app writes. Connection settings
+    (host/port/credentials/topic/tls) are env-only and are never accepted or
+    persisted here — enabling auto-sync requires the MQTT host already set in
+    the server env, since the scheduled job reads it from there.
+    """
+    if payload.sync_enabled and not settings.zigbee_mqtt_host:
+        raise HTTPException(
+            status_code=400,
+            detail="Cannot enable auto-sync: no Zigbee MQTT host configured in the server env.",
+        )
+    try:
+        settings.zigbee_sync_enabled = payload.sync_enabled
+        settings.zigbee_sync_interval = payload.sync_interval
+        settings.save_overrides()
+        set_zigbee_sync_enabled(payload.sync_enabled)
+        if payload.sync_enabled:
+            reschedule_zigbee_sync(payload.sync_interval)
+    except HTTPException:
+        raise
+    except Exception as exc:
+        raise HTTPException(status_code=500, detail=str(exc)) from exc
+
+    return await get_zigbee_config()

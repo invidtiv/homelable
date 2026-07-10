@@ -93,3 +93,29 @@ class ZigbeeImportPendingResponse(BaseModel):
     coordinator_already_existed: bool = False
     links_recorded: int
     device_count: int
+
+
+class ZigbeeConfig(BaseModel):
+    """Non-secret Zigbee connection + auto-sync config (GET response).
+
+    MQTT connection fields (host/port/base_topic/tls) are env-only and
+    read-only here — surfaced for display. ``host_configured`` reflects whether
+    a server-side MQTT host is set (required for auto-sync). MQTT credentials
+    (username/password) are never carried."""
+
+    mqtt_host: str = ""
+    mqtt_port: int = Field(1883, ge=1, le=65535)
+    base_topic: str = "zigbee2mqtt"
+    mqtt_tls: bool = False
+    sync_enabled: bool = False
+    sync_interval: int = Field(3600, ge=300)
+    host_configured: bool = False
+
+
+class ZigbeeSyncConfig(BaseModel):
+    """User-editable auto-sync config (POST body). The ONLY persisted Zigbee
+    settings. Connection fields (host/port/credentials/topic/tls) are env-only
+    and are deliberately not accepted here."""
+
+    sync_enabled: bool = False
+    sync_interval: int = Field(3600, ge=300)

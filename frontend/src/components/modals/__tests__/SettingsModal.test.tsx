@@ -13,9 +13,19 @@ vi.mock('@/api/client', () => ({
     saveConfig: vi.fn(),
     syncNow: vi.fn(),
   },
+  zigbeeApi: {
+    getConfig: vi.fn(),
+    saveConfig: vi.fn(),
+    syncNow: vi.fn(),
+  },
+  zwaveApi: {
+    getConfig: vi.fn(),
+    saveConfig: vi.fn(),
+    syncNow: vi.fn(),
+  },
 }))
 
-import { settingsApi, proxmoxApi } from '@/api/client'
+import { settingsApi, proxmoxApi, zigbeeApi, zwaveApi } from '@/api/client'
 import { toast } from 'sonner'
 import { useCanvasStore } from '@/stores/canvasStore'
 
@@ -26,8 +36,23 @@ describe('SettingsModal', () => {
     vi.mocked(settingsApi.save).mockResolvedValue({ data: { interval_seconds: 60, service_check_enabled: false, service_check_interval: 300 } } as never)
     vi.mocked(proxmoxApi.getConfig).mockRejectedValue(new Error('not configured'))
     vi.mocked(proxmoxApi.saveConfig).mockResolvedValue({ data: {} } as never)
+    // Zigbee/Z-Wave default to "not configured" so the mesh sections stay hidden
+    // unless a test opts in — keeps the single Proxmox "Re-sync now" unambiguous.
+    vi.mocked(zigbeeApi.getConfig).mockRejectedValue(new Error('not configured'))
+    vi.mocked(zigbeeApi.saveConfig).mockResolvedValue({ data: {} } as never)
+    vi.mocked(zigbeeApi.syncNow).mockResolvedValue({ data: { status: 'running' } } as never)
+    vi.mocked(zwaveApi.getConfig).mockRejectedValue(new Error('not configured'))
+    vi.mocked(zwaveApi.saveConfig).mockResolvedValue({ data: {} } as never)
+    vi.mocked(zwaveApi.syncNow).mockResolvedValue({ data: { status: 'running' } } as never)
     vi.mocked(toast.success).mockReset()
     vi.mocked(toast.error).mockReset()
+  })
+
+  const zbConfig = (over = {}) => ({
+    data: { mqtt_host: 'broker', mqtt_port: 1883, base_topic: 'zigbee2mqtt', mqtt_tls: false, sync_enabled: false, sync_interval: 3600, host_configured: true, ...over },
+  })
+  const zwConfig = (over = {}) => ({
+    data: { mqtt_host: 'broker', mqtt_port: 1883, prefix: 'zwave', gateway_name: 'zwavejs2mqtt', mqtt_tls: false, sync_enabled: false, sync_interval: 3600, host_configured: true, ...over },
   })
 
   it('loads interval from API when opened', async () => {
@@ -141,6 +166,36 @@ describe('SettingsModal', () => {
     } as never)
     render(<SettingsModal open onClose={vi.fn()} />)
     await screen.findByDisplayValue('60')
+    expect(screen.queryByRole('button', { name: 'Re-sync now' })).toBeNull()
+  })
+
+  it('persists only Zigbee sync fields (not connection config) on Save', async () => {
+    vi.mocked(zigbeeApi.getConfig).mockResolvedValue(zbConfig({ sync_enabled: true, sync_interval: 1800 }) as never)
+    render(<SettingsModal open onClose={vi.fn()} />)
+    await screen.findByDisplayValue('60')
+    await screen.findByText('Zigbee auto-sync')
+    fireEvent.click(screen.getByRole('button', { name: 'Save' }))
+    await waitFor(() => {
+      expect(zigbeeApi.saveConfig).toHaveBeenCalledWith({ sync_enabled: true, sync_interval: 1800 })
+    })
+  })
+
+  it('triggers an immediate Z-Wave sync from its Re-sync now button', async () => {
+    vi.mocked(zwaveApi.getConfig).mockResolvedValue(zwConfig() as never)
+    render(<SettingsModal open onClose={vi.fn()} />)
+    await screen.findByText('Z-Wave auto-sync')
+    const btn = await screen.findByRole('button', { name: 'Re-sync now' })
+    fireEvent.click(btn)
+    await waitFor(() => {
+      expect(zwaveApi.syncNow).toHaveBeenCalledOnce()
+      expect(toast.success).toHaveBeenCalledWith('Z-Wave sync started')
+    })
+  })
+
+  it('shows an env-var hint instead of the section controls when mesh host is unset', async () => {
+    vi.mocked(zigbeeApi.getConfig).mockResolvedValue(zbConfig({ host_configured: false, mqtt_host: '' }) as never)
+    render(<SettingsModal open onClose={vi.fn()} />)
+    await screen.findByText('ZIGBEE_MQTT_HOST')
     expect(screen.queryByRole('button', { name: 'Re-sync now' })).toBeNull()
   })
 

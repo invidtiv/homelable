@@ -9,11 +9,17 @@ from app.core.scheduler import (
     _run_proxmox_sync,
     _run_service_checks,
     _run_status_checks,
+    _run_zigbee_sync,
+    _run_zwave_sync,
     reschedule_proxmox_sync,
     reschedule_service_checks,
     reschedule_status_checks,
+    reschedule_zigbee_sync,
+    reschedule_zwave_sync,
     set_proxmox_sync_enabled,
     set_service_checks_enabled,
+    set_zigbee_sync_enabled,
+    set_zwave_sync_enabled,
     start_scheduler,
     stop_scheduler,
 )
@@ -154,6 +160,8 @@ def test_scheduler_uses_settings_interval():
         mock_settings.status_checker_interval = 45
         mock_settings.service_check_enabled = False
         mock_settings.proxmox_sync_enabled = False
+        mock_settings.zigbee_sync_enabled = False
+        mock_settings.zwave_sync_enabled = False
         start_scheduler()
         _, kwargs = mock_sched.add_job.call_args
         assert kwargs["seconds"] == 45
@@ -167,6 +175,8 @@ def test_start_and_stop_scheduler():
         mock_settings.status_checker_interval = 60
         mock_settings.service_check_enabled = False
         mock_settings.proxmox_sync_enabled = False
+        mock_settings.zigbee_sync_enabled = False
+        mock_settings.zwave_sync_enabled = False
         start_scheduler()
         stop_scheduler()
         mock_sched.add_job.assert_called_once()
@@ -256,6 +266,8 @@ def test_start_scheduler_adds_service_job_when_enabled():
         mock_settings.service_check_enabled = True
         mock_settings.service_check_interval = 300
         mock_settings.proxmox_sync_enabled = False
+        mock_settings.zigbee_sync_enabled = False
+        mock_settings.zwave_sync_enabled = False
         start_scheduler()
     job_ids = [kw.get("id") for _, kw in mock_sched.add_job.call_args_list]
     assert "status_checks" in job_ids
@@ -341,6 +353,152 @@ async def test_run_proxmox_sync_records_scan_run(mem_db):
     mock_bg.assert_awaited_once_with(
         run.id, "pve", 8006, "root@pam!tok", "secret", False,
     )
+
+
+# ---------------------------------------------------------------------------
+# Zigbee / Z-Wave auto-sync jobs (MQTT mesh imports)
+# ---------------------------------------------------------------------------
+
+def test_set_zigbee_sync_enabled_adds_and_removes_job():
+    mock_sched = MagicMock()
+    mock_sched.running = True
+    with patch("app.core.scheduler.scheduler", mock_sched), \
+         patch("app.core.scheduler.settings") as mock_settings:
+        mock_settings.zigbee_sync_interval = 3600
+        mock_sched.get_job.return_value = None
+        set_zigbee_sync_enabled(True)
+        mock_sched.add_job.assert_called_once()
+        mock_sched.get_job.return_value = MagicMock()
+        set_zigbee_sync_enabled(False)
+        mock_sched.remove_job.assert_called_once_with("zigbee_sync")
+
+
+def test_set_zwave_sync_enabled_adds_and_removes_job():
+    mock_sched = MagicMock()
+    mock_sched.running = True
+    with patch("app.core.scheduler.scheduler", mock_sched), \
+         patch("app.core.scheduler.settings") as mock_settings:
+        mock_settings.zwave_sync_interval = 3600
+        mock_sched.get_job.return_value = None
+        set_zwave_sync_enabled(True)
+        mock_sched.add_job.assert_called_once()
+        mock_sched.get_job.return_value = MagicMock()
+        set_zwave_sync_enabled(False)
+        mock_sched.remove_job.assert_called_once_with("zwave_sync")
+
+
+def test_reschedule_zigbee_sync_rejects_short_interval():
+    with pytest.raises(ValueError):
+        reschedule_zigbee_sync(60)
+
+
+def test_reschedule_zwave_sync_rejects_short_interval():
+    with pytest.raises(ValueError):
+        reschedule_zwave_sync(60)
+
+
+@pytest.mark.asyncio
+async def test_run_zigbee_sync_skips_when_disabled():
+    with patch("app.core.scheduler.settings") as mock_settings:
+        mock_settings.zigbee_sync_enabled = False
+        await _run_zigbee_sync()  # returns before importing/fetching anything
+
+
+@pytest.mark.asyncio
+async def test_run_zigbee_sync_skips_when_no_host():
+    with patch("app.core.scheduler.settings") as mock_settings:
+        mock_settings.zigbee_sync_enabled = True
+        mock_settings.zigbee_mqtt_host = ""
+        await _run_zigbee_sync()  # no exception, no fetch
+
+
+@pytest.mark.asyncio
+async def test_run_zwave_sync_skips_when_no_host():
+    with patch("app.core.scheduler.settings") as mock_settings:
+        mock_settings.zwave_sync_enabled = True
+        mock_settings.zwave_mqtt_host = ""
+        await _run_zwave_sync()
+
+
+@pytest.mark.asyncio
+async def test_run_zigbee_sync_records_scan_run(mem_db):
+    """Auto-sync must create a ScanRun (kind=zigbee) so it shows in Scan history,
+    then delegate to the shared background import with the run id + env payload."""
+    from app.db.models import ScanRun
+    from app.schemas.zigbee import ZigbeeImportRequest
+
+    fake_payload = ZigbeeImportRequest(mqtt_host="broker", mqtt_port=1883)
+
+    with (
+        patch("app.core.scheduler.settings") as mock_settings,
+        patch("app.core.scheduler.AsyncSessionLocal", mem_db),
+        patch("app.api.routes.zigbee._background_zigbee_import", new_callable=AsyncMock) as mock_bg,
+        patch("app.api.routes.zigbee.env_import_request", return_value=fake_payload),
+    ):
+        mock_settings.zigbee_sync_enabled = True
+        mock_settings.zigbee_mqtt_host = "broker"
+        mock_settings.zigbee_mqtt_port = 1883
+        await _run_zigbee_sync()
+
+    async with mem_db() as db:
+        from sqlalchemy import select
+        run = (await db.execute(select(ScanRun))).scalars().one()
+    assert run.kind == "zigbee"
+    assert run.ranges == ["broker:1883"]
+    mock_bg.assert_awaited_once_with(run.id, fake_payload)
+
+
+@pytest.mark.asyncio
+async def test_run_zwave_sync_records_scan_run(mem_db):
+    """Auto-sync must create a ScanRun (kind=zwave) then delegate to the shared
+    background import with the run id + env payload."""
+    from app.db.models import ScanRun
+    from app.schemas.zwave import ZwaveImportRequest
+
+    fake_payload = ZwaveImportRequest(mqtt_host="broker", mqtt_port=1883)
+
+    with (
+        patch("app.core.scheduler.settings") as mock_settings,
+        patch("app.core.scheduler.AsyncSessionLocal", mem_db),
+        patch("app.api.routes.zwave._background_zwave_import", new_callable=AsyncMock) as mock_bg,
+        patch("app.api.routes.zwave.env_import_request", return_value=fake_payload),
+    ):
+        mock_settings.zwave_sync_enabled = True
+        mock_settings.zwave_mqtt_host = "broker"
+        mock_settings.zwave_mqtt_port = 1883
+        await _run_zwave_sync()
+
+    async with mem_db() as db:
+        from sqlalchemy import select
+        run = (await db.execute(select(ScanRun))).scalars().one()
+    assert run.kind == "zwave"
+    assert run.ranges == ["broker:1883"]
+    mock_bg.assert_awaited_once_with(run.id, fake_payload)
+
+
+def test_reschedule_zigbee_sync_noop_when_not_running():
+    mock_sched = MagicMock()
+    mock_sched.running = False
+    with patch("app.core.scheduler.scheduler", mock_sched):
+        reschedule_zigbee_sync(600)
+    mock_sched.reschedule_job.assert_not_called()
+
+
+def test_start_scheduler_adds_mesh_jobs_when_enabled():
+    mock_sched = MagicMock()
+    with patch("app.core.scheduler.settings") as mock_settings, \
+         patch("app.core.scheduler.AsyncIOScheduler", return_value=mock_sched):
+        mock_settings.status_checker_interval = 60
+        mock_settings.service_check_enabled = False
+        mock_settings.proxmox_sync_enabled = False
+        mock_settings.zigbee_sync_enabled = True
+        mock_settings.zigbee_sync_interval = 3600
+        mock_settings.zwave_sync_enabled = True
+        mock_settings.zwave_sync_interval = 3600
+        start_scheduler()
+    job_ids = [kw.get("id") for _, kw in mock_sched.add_job.call_args_list]
+    assert "zigbee_sync" in job_ids
+    assert "zwave_sync" in job_ids
 
 
 # --- reschedule_* validation and not-running guards ---

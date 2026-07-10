@@ -211,6 +211,39 @@ export const designsApi = {
   delete: (id: string) => api.delete(`/designs/${id}`),
 }
 
+export interface ZigbeeConfigData {
+  mqtt_host: string
+  mqtt_port: number
+  base_topic: string
+  mqtt_tls: boolean
+  sync_enabled: boolean
+  sync_interval: number
+  host_configured: boolean
+}
+
+export interface ZwaveConfigData {
+  mqtt_host: string
+  mqtt_port: number
+  prefix: string
+  gateway_name: string
+  mqtt_tls: boolean
+  sync_enabled: boolean
+  sync_interval: number
+  host_configured: boolean
+}
+
+// Shape returned by every background-scan trigger (import-pending / sync-now).
+interface ScanRunResult {
+  id: string
+  status: string
+  kind: string
+  ranges: string[]
+  devices_found: number
+  started_at: string
+  finished_at: string | null
+  error: string | null
+}
+
 export const zigbeeApi = {
   testConnection: (data: {
     mqtt_host: string
@@ -256,6 +289,13 @@ export const zigbeeApi = {
       finished_at: string | null
       error: string | null
     }>('/zigbee/import-pending', data),
+
+  getConfig: () => api.get<ZigbeeConfigData>('/zigbee/config'),
+  // Only the auto-sync activation is persisted. MQTT connection config
+  // (host/port/credentials/topic/tls) is env-only and never sent.
+  saveConfig: (data: { sync_enabled: boolean; sync_interval: number }) =>
+    api.post<ZigbeeConfigData>('/zigbee/config', data),
+  syncNow: () => api.post<ScanRunResult>('/zigbee/sync-now'),
 }
 
 export const zwaveApi = {
@@ -305,4 +345,11 @@ export const zwaveApi = {
       finished_at: string | null
       error: string | null
     }>('/zwave/import-pending', data),
+
+  getConfig: () => api.get<ZwaveConfigData>('/zwave/config'),
+  // Only the auto-sync activation is persisted. MQTT connection config
+  // (host/port/credentials/prefix/gateway/tls) is env-only and never sent.
+  saveConfig: (data: { sync_enabled: boolean; sync_interval: number }) =>
+    api.post<ZwaveConfigData>('/zwave/config', data),
+  syncNow: () => api.post<ScanRunResult>('/zwave/sync-now'),
 }

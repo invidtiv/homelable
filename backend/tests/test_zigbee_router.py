@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from unittest.mock import patch
+from unittest.mock import AsyncMock, patch
 
 import pytest
 from httpx import AsyncClient
@@ -740,3 +740,106 @@ async def test_test_connection_with_tls(client: AsyncClient, headers: dict) -> N
     kwargs = mock_conn.call_args.kwargs
     assert kwargs["tls"] is True
     assert kwargs["tls_insecure"] is True
+
+
+# ---------------------------------------------------------------------------
+# /api/v1/zigbee/config + /sync-now (auto-sync)
+# ---------------------------------------------------------------------------
+
+from app.core.config import settings  # noqa: E402
+
+
+@pytest.fixture
+def _restore_zigbee_env():
+    """Snapshot + restore the env-only Zigbee connection/activation settings."""
+    keys = (
+        "zigbee_mqtt_host", "zigbee_mqtt_port", "zigbee_mqtt_username",
+        "zigbee_mqtt_password", "zigbee_base_topic", "zigbee_sync_enabled",
+        "zigbee_sync_interval",
+    )
+    saved = {k: getattr(settings, k) for k in keys}
+    yield
+    for k, v in saved.items():
+        setattr(settings, k, v)
+
+
+@pytest.mark.asyncio
+async def test_config_omits_credentials(
+    client: AsyncClient, headers: dict, _restore_zigbee_env
+) -> None:
+    settings.zigbee_mqtt_host = "broker"
+    settings.zigbee_mqtt_username = "user"
+    settings.zigbee_mqtt_password = "supersecret"
+    res = await client.get("/api/v1/zigbee/config", headers=headers)
+    assert res.status_code == 200
+    assert "supersecret" not in res.text
+    assert "user" not in res.text
+    assert res.json()["host_configured"] is True
+
+
+@pytest.mark.asyncio
+async def test_config_requires_auth(client: AsyncClient) -> None:
+    res = await client.get("/api/v1/zigbee/config")
+    assert res.status_code == 401
+
+
+@pytest.mark.asyncio
+async def test_enable_sync_without_host_rejected(
+    client: AsyncClient, headers: dict, _restore_zigbee_env
+) -> None:
+    settings.zigbee_mqtt_host = ""
+    res = await client.post(
+        "/api/v1/zigbee/config",
+        json={"sync_enabled": True, "sync_interval": 600},
+        headers=headers,
+    )
+    assert res.status_code == 400
+
+
+@pytest.mark.asyncio
+async def test_save_config_persists_only_sync_fields(
+    client: AsyncClient, headers: dict, _restore_zigbee_env
+) -> None:
+    settings.zigbee_mqtt_host = "broker"
+    saved: dict = {}
+    with patch.object(type(settings), "save_overrides", lambda self: saved.update(
+        host=self.zigbee_mqtt_host, enabled=self.zigbee_sync_enabled,
+        interval=self.zigbee_sync_interval,
+    )), patch("app.api.routes.zigbee.set_zigbee_sync_enabled"), \
+            patch("app.api.routes.zigbee.reschedule_zigbee_sync"):
+        res = await client.post(
+            "/api/v1/zigbee/config",
+            json={"mqtt_host": "attacker", "sync_enabled": True, "sync_interval": 900},
+            headers=headers,
+        )
+    assert res.status_code == 200
+    assert settings.zigbee_mqtt_host == "broker"  # body host ignored
+    assert saved == {"host": "broker", "enabled": True, "interval": 900}
+
+
+@pytest.mark.asyncio
+async def test_sync_now_creates_scan_run(
+    client: AsyncClient, headers: dict, _restore_zigbee_env
+) -> None:
+    settings.zigbee_mqtt_host = "broker"
+    with patch("app.api.routes.zigbee._background_zigbee_import", new_callable=AsyncMock):
+        res = await client.post("/api/v1/zigbee/sync-now", headers=headers)
+    assert res.status_code == 200
+    data = res.json()
+    assert data["kind"] == "zigbee"
+    assert data["status"] == "running"
+
+
+@pytest.mark.asyncio
+async def test_sync_now_rejected_without_host(
+    client: AsyncClient, headers: dict, _restore_zigbee_env
+) -> None:
+    settings.zigbee_mqtt_host = ""
+    res = await client.post("/api/v1/zigbee/sync-now", headers=headers)
+    assert res.status_code == 400
+
+
+@pytest.mark.asyncio
+async def test_sync_now_requires_auth(client: AsyncClient) -> None:
+    res = await client.post("/api/v1/zigbee/sync-now")
+    assert res.status_code == 401

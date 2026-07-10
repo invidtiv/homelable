@@ -93,6 +93,32 @@ class Settings(BaseSettings):
     proxmox_sync_enabled: bool = False
     proxmox_sync_interval: int = 3600  # seconds (floor 300 enforced on write)
 
+    # Zigbee2MQTT auto-sync import.
+    # MQTT credentials are secrets → env/.env ONLY, never persisted by the app to
+    # scan_config.json and never returned by the API. Only the auto-sync
+    # activation (enabled + interval) is persisted; connection config is env-only.
+    zigbee_mqtt_host: str = ""
+    zigbee_mqtt_port: int = 1883
+    zigbee_mqtt_username: str = ""
+    zigbee_mqtt_password: str = ""
+    zigbee_base_topic: str = "zigbee2mqtt"
+    zigbee_mqtt_tls: bool = False
+    zigbee_mqtt_tls_insecure: bool = False
+    zigbee_sync_enabled: bool = False
+    zigbee_sync_interval: int = 3600  # seconds (floor 300 enforced on write)
+
+    # Z-Wave JS UI (zwavejs2mqtt) auto-sync import. Same secret/env rules.
+    zwave_mqtt_host: str = ""
+    zwave_mqtt_port: int = 1883
+    zwave_mqtt_username: str = ""
+    zwave_mqtt_password: str = ""
+    zwave_prefix: str = "zwave"
+    zwave_gateway_name: str = "zwavejs2mqtt"
+    zwave_mqtt_tls: bool = False
+    zwave_mqtt_tls_insecure: bool = False
+    zwave_sync_enabled: bool = False
+    zwave_sync_interval: int = 3600  # seconds (floor 300 enforced on write)
+
     def _override_path(self) -> Path:
         return Path(self.sqlite_path).parent / "scan_config.json"
 
@@ -129,6 +155,17 @@ class Settings(BaseSettings):
                 self.proxmox_sync_enabled = bool(data["proxmox_sync_enabled"])
             if "proxmox_sync_interval" in data:
                 self.proxmox_sync_interval = int(data["proxmox_sync_interval"])
+            # Zigbee/Z-Wave: only the auto-sync activation is persisted. MQTT
+            # connection config (host, port, credentials, topic, tls) is env-only
+            # by design — never read from or written to this file.
+            if "zigbee_sync_enabled" in data:
+                self.zigbee_sync_enabled = bool(data["zigbee_sync_enabled"])
+            if "zigbee_sync_interval" in data:
+                self.zigbee_sync_interval = int(data["zigbee_sync_interval"])
+            if "zwave_sync_enabled" in data:
+                self.zwave_sync_enabled = bool(data["zwave_sync_enabled"])
+            if "zwave_sync_interval" in data:
+                self.zwave_sync_interval = int(data["zwave_sync_interval"])
         except Exception:
             pass
 
@@ -148,6 +185,12 @@ class Settings(BaseSettings):
             # be written to disk — that is the single source of truth.
             "proxmox_sync_enabled": self.proxmox_sync_enabled,
             "proxmox_sync_interval": self.proxmox_sync_interval,
+            # Zigbee/Z-Wave: only the auto-sync activation is persisted. MQTT
+            # connection config (host/port/credentials/topic/tls) is env-only.
+            "zigbee_sync_enabled": self.zigbee_sync_enabled,
+            "zigbee_sync_interval": self.zigbee_sync_interval,
+            "zwave_sync_enabled": self.zwave_sync_enabled,
+            "zwave_sync_interval": self.zwave_sync_interval,
         }))
 
 

@@ -492,3 +492,108 @@ async def test_persist_device_on_multiple_canvases(db_session) -> None:
     for n in nodes:
         model = {p["key"]: p["value"] for p in n.properties}.get("Model")
         assert model == "ZW200"  # refreshed on every canvas
+
+
+# ---------------------------------------------------------------------------
+# /api/v1/zwave/config + /sync-now (auto-sync)
+# ---------------------------------------------------------------------------
+
+from unittest.mock import AsyncMock  # noqa: E402
+
+from app.core.config import settings  # noqa: E402
+
+
+@pytest.fixture
+def _restore_zwave_env():
+    """Snapshot + restore the env-only Z-Wave connection/activation settings."""
+    keys = (
+        "zwave_mqtt_host", "zwave_mqtt_port", "zwave_mqtt_username",
+        "zwave_mqtt_password", "zwave_prefix", "zwave_gateway_name",
+        "zwave_sync_enabled", "zwave_sync_interval",
+    )
+    saved = {k: getattr(settings, k) for k in keys}
+    yield
+    for k, v in saved.items():
+        setattr(settings, k, v)
+
+
+@pytest.mark.asyncio
+async def test_config_omits_credentials(
+    client: AsyncClient, headers: dict, _restore_zwave_env
+) -> None:
+    settings.zwave_mqtt_host = "broker"
+    settings.zwave_mqtt_username = "user"
+    settings.zwave_mqtt_password = "supersecret"
+    res = await client.get("/api/v1/zwave/config", headers=headers)
+    assert res.status_code == 200
+    assert "supersecret" not in res.text
+    assert "user" not in res.text
+    assert res.json()["host_configured"] is True
+
+
+@pytest.mark.asyncio
+async def test_config_requires_auth(client: AsyncClient) -> None:
+    res = await client.get("/api/v1/zwave/config")
+    assert res.status_code == 401
+
+
+@pytest.mark.asyncio
+async def test_enable_sync_without_host_rejected(
+    client: AsyncClient, headers: dict, _restore_zwave_env
+) -> None:
+    settings.zwave_mqtt_host = ""
+    res = await client.post(
+        "/api/v1/zwave/config",
+        json={"sync_enabled": True, "sync_interval": 600},
+        headers=headers,
+    )
+    assert res.status_code == 400
+
+
+@pytest.mark.asyncio
+async def test_save_config_persists_only_sync_fields(
+    client: AsyncClient, headers: dict, _restore_zwave_env
+) -> None:
+    settings.zwave_mqtt_host = "broker"
+    saved: dict = {}
+    with patch.object(type(settings), "save_overrides", lambda self: saved.update(
+        host=self.zwave_mqtt_host, enabled=self.zwave_sync_enabled,
+        interval=self.zwave_sync_interval,
+    )), patch("app.api.routes.zwave.set_zwave_sync_enabled"), \
+            patch("app.api.routes.zwave.reschedule_zwave_sync"):
+        res = await client.post(
+            "/api/v1/zwave/config",
+            json={"mqtt_host": "attacker", "sync_enabled": True, "sync_interval": 900},
+            headers=headers,
+        )
+    assert res.status_code == 200
+    assert settings.zwave_mqtt_host == "broker"  # body host ignored
+    assert saved == {"host": "broker", "enabled": True, "interval": 900}
+
+
+@pytest.mark.asyncio
+async def test_sync_now_creates_scan_run(
+    client: AsyncClient, headers: dict, _restore_zwave_env
+) -> None:
+    settings.zwave_mqtt_host = "broker"
+    with patch("app.api.routes.zwave._background_zwave_import", new_callable=AsyncMock):
+        res = await client.post("/api/v1/zwave/sync-now", headers=headers)
+    assert res.status_code == 200
+    data = res.json()
+    assert data["kind"] == "zwave"
+    assert data["status"] == "running"
+
+
+@pytest.mark.asyncio
+async def test_sync_now_rejected_without_host(
+    client: AsyncClient, headers: dict, _restore_zwave_env
+) -> None:
+    settings.zwave_mqtt_host = ""
+    res = await client.post("/api/v1/zwave/sync-now", headers=headers)
+    assert res.status_code == 400
+
+
+@pytest.mark.asyncio
+async def test_sync_now_requires_auth(client: AsyncClient) -> None:
+    res = await client.post("/api/v1/zwave/sync-now")
+    assert res.status_code == 401
