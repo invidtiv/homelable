@@ -5,6 +5,34 @@ All notable changes to **Homelable** are documented here.
 The format is loosely based on [Keep a Changelog](https://keepachangelog.com/),
 and this project adheres to [Semantic Versioning](https://semver.org/).
 
+## [3.0.0] - 2026-07-10
+
+### Added
+
+- Proxmox VE import: pull hosts, VMs and LXC into inventory, with optional scheduled auto-sync and a manual re-sync button (connection config is now env-only). (#253, #259)
+- Scheduled auto-sync for Zigbee & Z-Wave imports. (#270)
+- Floor plan map background, LQI-based edge coloring, and Zigbee path highlighting. Thanks @pranjal-joshi. (#207)
+- Customizable connection points per node side. (#249)
+- Configurable edge line style + width per type and per edge, plus selectable endpoint marker shapes. (#250, #252)
+- Create a new canvas by copying an existing one. (#257)
+- Prompt on duplicate device instead of silently blocking/merging on approve. (#261)
+- Active design synced to URL for refresh/share. (#263)
+- MCP can target a specific design/canvas, create canvases, and auto-position nodes with auto-assigned edge handles. Thanks @nicolabottini. (#266)
+
+### Fixed
+
+- Mesh (Zigbee/Z-Wave) import: duplicate-node crash and coordinator now routed to pending. (#247)
+- Keep mesh/cluster links so edges resolve onto a second canvas. (#254)
+- Preserve edge connection points in YAML export/import. (#255, #208)
+- Harden media path handling against path injection. (#256)
+- Match scanned devices to canvas nodes by ip-token and MAC. (#262, #258)
+- Record ScanRun for scheduled Proxmox auto-sync. (#269)
+
+### Docs
+
+- User-facing FEATURES.md. (#248)
+- CHANGELOG with full release history. (#264)
+
 ## [2.6.1] - 2026-06-30
 
 ### Added
