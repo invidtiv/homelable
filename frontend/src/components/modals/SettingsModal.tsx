@@ -249,12 +249,14 @@ export function SettingsModal({ open, onClose }: SettingsModalProps) {
 
   return (
     <Dialog open={open} onOpenChange={(v) => !v && onClose()}>
-      <DialogContent className="bg-[#161b22] border-border max-w-md">
+      <DialogContent className="bg-[#161b22] border-border max-w-[calc(100%-2rem)] sm:max-w-3xl max-h-[90vh] overflow-y-auto">
         <DialogHeader>
           <DialogTitle className="text-foreground">Settings</DialogTitle>
         </DialogHeader>
 
-        <div className="space-y-5 py-2">
+        <div className="grid grid-cols-1 md:grid-cols-2 gap-x-6 gap-y-5 py-2">
+          {/* Left column */}
+          <div className="space-y-5">
           {/* Status checker */}
           {!STANDALONE && (
           <div className="space-y-1.5">
@@ -304,6 +306,90 @@ export function SettingsModal({ open, onClose }: SettingsModalProps) {
               </p>
             </div>
           </div>
+          )}
+
+          {/* Canvas */}
+          <div className="pt-3 border-t border-border space-y-3">
+            <span className="text-xs font-medium text-muted-foreground uppercase tracking-wider">Canvas</span>
+
+            <label className="flex items-center justify-between gap-2 cursor-pointer">
+              <span className="text-xs text-foreground">Snap to nodes</span>
+              <input
+                type="checkbox"
+                checked={alignment.enabled}
+                onChange={(e) => updateAlignment({ enabled: e.target.checked })}
+                className="cursor-pointer accent-[#00d4ff]"
+                aria-label="Toggle alignment guides"
+              />
+            </label>
+
+            <label className="flex items-center justify-between gap-2 cursor-pointer">
+              <span className="text-xs text-foreground">Hide IP addresses</span>
+              <input
+                type="checkbox"
+                checked={hideIp}
+                onChange={(e) => setHideIp(e.target.checked)}
+                className="cursor-pointer accent-[#00d4ff]"
+                aria-label="Toggle IP address masking"
+              />
+            </label>
+
+            <div className={alignment.enabled ? 'space-y-1.5' : 'space-y-1.5 opacity-50 pointer-events-none'}>
+              <label className="text-xs text-muted-foreground">Snap distance</label>
+              <div className="flex items-center gap-2">
+                <input
+                  type="range"
+                  min={2}
+                  max={16}
+                  step={1}
+                  value={alignment.threshold}
+                  onChange={(e) => updateAlignment({ threshold: Number(e.target.value) })}
+                  className="flex-1 cursor-pointer accent-[#00d4ff]"
+                  aria-label="Alignment snap threshold"
+                />
+                <span className="font-mono text-[11px] text-foreground w-8 text-right">{alignment.threshold}px</span>
+              </div>
+              <p className="text-[10px] text-muted-foreground leading-tight">
+                Distance at which dragged nodes snap to neighbours. Hold Alt while dragging to disable.
+              </p>
+            </div>
+          </div>
+          </div>
+
+          {/* Right column */}
+          <div className="space-y-5">
+          {/* Zigbee auto-sync */}
+          {!STANDALONE && zbConfig && (
+            <MeshAutoSync
+              title="Zigbee auto-sync"
+              accent="#39d353"
+              hostConfigured={zbConfig.host_configured}
+              envHostVar="ZIGBEE_MQTT_HOST"
+              enabled={zbSyncEnabled}
+              onEnabledChange={setZbSyncEnabled}
+              interval={zbInterval}
+              onIntervalChange={setZbInterval}
+              description="Re-imports the Zigbee mesh into the pending inventory. Min 300s (5 min)."
+              syncing={zbSyncing}
+              onSyncNow={handleZbSyncNow}
+            />
+          )}
+
+          {/* Z-Wave auto-sync */}
+          {!STANDALONE && zwConfig && (
+            <MeshAutoSync
+              title="Z-Wave auto-sync"
+              accent="#a855f7"
+              hostConfigured={zwConfig.host_configured}
+              envHostVar="ZWAVE_MQTT_HOST"
+              enabled={zwSyncEnabled}
+              onEnabledChange={setZwSyncEnabled}
+              interval={zwInterval}
+              onIntervalChange={setZwInterval}
+              description="Re-imports the Z-Wave network into the pending inventory. Min 300s (5 min)."
+              syncing={zwSyncing}
+              onSyncNow={handleZwSyncNow}
+            />
           )}
 
           {/* Proxmox auto-sync */}
@@ -368,86 +454,6 @@ export function SettingsModal({ open, onClose }: SettingsModalProps) {
             )}
           </div>
           )}
-
-          {/* Zigbee auto-sync */}
-          {!STANDALONE && zbConfig && (
-            <MeshAutoSync
-              title="Zigbee auto-sync"
-              accent="#39d353"
-              hostConfigured={zbConfig.host_configured}
-              envHostVar="ZIGBEE_MQTT_HOST"
-              enabled={zbSyncEnabled}
-              onEnabledChange={setZbSyncEnabled}
-              interval={zbInterval}
-              onIntervalChange={setZbInterval}
-              description="Re-imports the Zigbee mesh into the pending inventory. Min 300s (5 min)."
-              syncing={zbSyncing}
-              onSyncNow={handleZbSyncNow}
-            />
-          )}
-
-          {/* Z-Wave auto-sync */}
-          {!STANDALONE && zwConfig && (
-            <MeshAutoSync
-              title="Z-Wave auto-sync"
-              accent="#a855f7"
-              hostConfigured={zwConfig.host_configured}
-              envHostVar="ZWAVE_MQTT_HOST"
-              enabled={zwSyncEnabled}
-              onEnabledChange={setZwSyncEnabled}
-              interval={zwInterval}
-              onIntervalChange={setZwInterval}
-              description="Re-imports the Z-Wave network into the pending inventory. Min 300s (5 min)."
-              syncing={zwSyncing}
-              onSyncNow={handleZwSyncNow}
-            />
-          )}
-
-          {/* Canvas */}
-          <div className="pt-3 border-t border-border space-y-3">
-            <span className="text-xs font-medium text-muted-foreground uppercase tracking-wider">Canvas</span>
-
-            <label className="flex items-center justify-between gap-2 cursor-pointer">
-              <span className="text-xs text-foreground">Snap to nodes</span>
-              <input
-                type="checkbox"
-                checked={alignment.enabled}
-                onChange={(e) => updateAlignment({ enabled: e.target.checked })}
-                className="cursor-pointer accent-[#00d4ff]"
-                aria-label="Toggle alignment guides"
-              />
-            </label>
-
-            <label className="flex items-center justify-between gap-2 cursor-pointer">
-              <span className="text-xs text-foreground">Hide IP addresses</span>
-              <input
-                type="checkbox"
-                checked={hideIp}
-                onChange={(e) => setHideIp(e.target.checked)}
-                className="cursor-pointer accent-[#00d4ff]"
-                aria-label="Toggle IP address masking"
-              />
-            </label>
-
-            <div className={alignment.enabled ? 'space-y-1.5' : 'space-y-1.5 opacity-50 pointer-events-none'}>
-              <label className="text-xs text-muted-foreground">Snap distance</label>
-              <div className="flex items-center gap-2">
-                <input
-                  type="range"
-                  min={2}
-                  max={16}
-                  step={1}
-                  value={alignment.threshold}
-                  onChange={(e) => updateAlignment({ threshold: Number(e.target.value) })}
-                  className="flex-1 cursor-pointer accent-[#00d4ff]"
-                  aria-label="Alignment snap threshold"
-                />
-                <span className="font-mono text-[11px] text-foreground w-8 text-right">{alignment.threshold}px</span>
-              </div>
-              <p className="text-[10px] text-muted-foreground leading-tight">
-                Distance at which dragged nodes snap to neighbours. Hold Alt while dragging to disable.
-              </p>
-            </div>
           </div>
         </div>
 
