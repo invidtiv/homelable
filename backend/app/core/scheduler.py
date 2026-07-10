@@ -1,7 +1,9 @@
 """APScheduler setup for background scan and status check jobs."""
 import asyncio
 import logging
+from collections.abc import Awaitable, Callable
 from datetime import datetime, timezone
+from typing import TYPE_CHECKING, Any
 
 from apscheduler.schedulers.asyncio import AsyncIOScheduler
 from sqlalchemy import select
@@ -10,6 +12,10 @@ from app.core.config import settings
 from app.db.database import AsyncSessionLocal
 from app.db.models import Node
 from app.services.status_checker import check_node, check_services
+
+if TYPE_CHECKING:
+    from app.schemas.zigbee import ZigbeeImportRequest
+    from app.schemas.zwave import ZwaveImportRequest
 
 logger = logging.getLogger(__name__)
 
@@ -154,14 +160,19 @@ async def _run_mesh_sync(kind: str) -> None:
     """
     from app.db.models import ScanRun
 
+    payload: ZigbeeImportRequest | ZwaveImportRequest
+    background: Callable[[str, Any], Awaitable[None]]
+
     if kind == "zigbee":
         if not settings.zigbee_sync_enabled:
             return
         if not settings.zigbee_mqtt_host:
             logger.warning("Zigbee auto-sync enabled but MQTT host not configured — skipping")
             return
-        from app.api.routes.zigbee import _background_zigbee_import, env_import_request
+        from app.api.routes.zigbee import _background_zigbee_import
+        from app.api.routes.zigbee import env_import_request as _zigbee_env_request
         host, port = settings.zigbee_mqtt_host, settings.zigbee_mqtt_port
+        payload = _zigbee_env_request()
         background = _background_zigbee_import
     else:
         if not settings.zwave_sync_enabled:
@@ -169,11 +180,11 @@ async def _run_mesh_sync(kind: str) -> None:
         if not settings.zwave_mqtt_host:
             logger.warning("Z-Wave auto-sync enabled but MQTT host not configured — skipping")
             return
-        from app.api.routes.zwave import _background_zwave_import, env_import_request
+        from app.api.routes.zwave import _background_zwave_import
+        from app.api.routes.zwave import env_import_request as _zwave_env_request
         host, port = settings.zwave_mqtt_host, settings.zwave_mqtt_port
+        payload = _zwave_env_request()
         background = _background_zwave_import
-
-    payload = env_import_request()
     async with AsyncSessionLocal() as db:
         run = ScanRun(status="running", kind=kind, ranges=[f"{host}:{port}"])
         db.add(run)
