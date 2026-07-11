@@ -266,3 +266,19 @@ def test_create_design_schema_requires_name():
 async def test_unknown_tool():
     with pytest.raises(ValueError, match="Unknown tool"):
         await _dispatch("nonexistent", {})
+
+
+@pytest.mark.anyio
+async def test_list_pending_devices_filters_non_pending(mock_backend):
+    """The tool promises devices *not yet approved or hidden*; the backend
+    endpoint returns the whole inventory including approved rows (they carry
+    the canvas-presence badge). The tool must filter to status == "pending"
+    and keep legacy rows that lack the field."""
+    mock_backend.get = AsyncMock(return_value=[
+        {"id": "p1", "ip": "192.168.1.50", "status": "pending"},
+        {"id": "a1", "ip": "192.168.1.60", "status": "approved"},
+        {"id": "h1", "ip": "192.168.1.70", "status": "hidden"},
+        {"id": "legacy", "ip": "192.168.1.80"},
+    ])
+    result = await _dispatch("list_pending_devices", {})
+    assert [d["id"] for d in result] == ["p1", "legacy"]

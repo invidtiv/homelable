@@ -228,7 +228,12 @@ async def _dispatch(name: str, args: dict) -> dict:
         return await backend.get("/api/v1/nodes")
 
     if name == "list_pending_devices":
-        return await backend.get("/api/v1/scan/pending")
+        # Backend /scan/pending returns the whole inventory: approved rows stay
+        # listed so the frontend can show a canvas-presence badge. This tool
+        # promises only devices "not yet approved or hidden", so filter to
+        # actual pending rows (legacy rows without a status count as pending).
+        devices = await backend.get("/api/v1/scan/pending")
+        return [d for d in devices if d.get("status", "pending") == "pending"]
 
     if name == "list_designs":
         return await backend.get("/api/v1/designs")
