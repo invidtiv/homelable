@@ -55,7 +55,7 @@ import { buildProxmoxClusterEdges } from '@/components/proxmox/clusterEdges'
 const STANDALONE = import.meta.env.VITE_STANDALONE === 'true'
 
 export default function App() {
-  const { loadCanvas, applyLayout, markSaved, markUnsaved, hasUnsavedChanges, selectedNodeId, selectedNodeIds, addNode, updateNode, deleteNode, onConnect, updateEdge, deleteEdge, setProxmoxContainerMode, setNodeZIndex, editingGroupRectId, setEditingGroupRectId, editingTextId, setEditingTextId, nodes, edges, snapshotHistory, undo, redo, addToGroup, addToContainer, floorMap, setFloorMap } = useCanvasStore()
+  const { loadCanvas, applyLayout, markSaved, markUnsaved, hasUnsavedChanges, editSeq, selectedNodeId, selectedNodeIds, addNode, updateNode, deleteNode, onConnect, updateEdge, deleteEdge, setProxmoxContainerMode, setNodeZIndex, editingGroupRectId, setEditingGroupRectId, editingTextId, setEditingTextId, nodes, edges, snapshotHistory, undo, redo, addToGroup, addToContainer, floorMap, setFloorMap } = useCanvasStore()
   const canvasRef = useRef<HTMLDivElement>(null)
   const { isAuthenticated } = useAuthStore()
   const { activeTheme, setTheme, customStyle, setCustomStyle } = useThemeStore()
@@ -142,7 +142,10 @@ export default function App() {
     delaySeconds: autosave.delay,
     hasUnsavedChanges,
     designId: loadedDesignId,
-    changeSignals: [nodes, edges],
+    // Debounce resets on each real user edit (editSeq), not on raw nodes/edges
+    // identity — live status polling churns those arrays without a user edit and
+    // would otherwise keep re-arming (and starving) the timer during monitoring.
+    changeSignals: [editSeq],
     getLiveDesignId: () => loadedDesignIdRef.current,
     onSave: (designId) => { void handleSaveRef.current(designId, { silent: true }) },
   })

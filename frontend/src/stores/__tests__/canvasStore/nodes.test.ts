@@ -9,6 +9,7 @@ function resetStore() {
     nodes: [],
     edges: [],
     hasUnsavedChanges: false,
+    editSeq: 0,
     selectedNodeId: null,
     selectedNodeIds: [],
     editingGroupRectId: null,
@@ -95,6 +96,34 @@ describe('canvasStore — nodes', () => {
     useCanvasStore.setState({ hasUnsavedChanges: false })
     useCanvasStore.getState().onNodesChange([{ id: 'n1', type: 'select', selected: true }])
     expect(useCanvasStore.getState().hasUnsavedChanges).toBe(false)
+  })
+
+  it('editSeq bumps on a real user edit but not on status/select/measure churn', () => {
+    const seq = () => useCanvasStore.getState().editSeq
+
+    // Real edit bumps.
+    const before = seq()
+    useCanvasStore.getState().addNode(makeNode('n1'))
+    expect(seq()).toBe(before + 1)
+
+    // Live status update: no bump (not a user edit).
+    const afterAdd = seq()
+    useCanvasStore.getState().setNodeStatus('n1', { status: 'online' })
+    expect(seq()).toBe(afterAdd)
+
+    // Select-only change: no bump.
+    useCanvasStore.getState().onNodesChange([{ id: 'n1', type: 'select', selected: true }])
+    expect(seq()).toBe(afterAdd)
+
+    // Initial dimensions measure: no bump.
+    useCanvasStore.getState().onNodesChange([
+      { id: 'n1', type: 'dimensions', dimensions: { width: 120, height: 40 } },
+    ])
+    expect(seq()).toBe(afterAdd)
+
+    // Another real edit bumps again.
+    useCanvasStore.getState().updateNode('n1', { label: 'renamed' })
+    expect(seq()).toBe(afterAdd + 1)
   })
 
   it('setEditingTextId sets and clears editing text id', () => {

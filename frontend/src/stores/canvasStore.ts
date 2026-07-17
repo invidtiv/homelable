@@ -109,6 +109,14 @@ interface CanvasState {
   nodes: Node<NodeData>[]
   edges: Edge<EdgeData>[]
   hasUnsavedChanges: boolean
+  /**
+   * Monotonic counter incremented on every real user edit (auto-bumped whenever
+   * an action sets hasUnsavedChanges to true). Consumers that need to react to
+   * *edits specifically* — e.g. the autosave debounce — key off this instead of
+   * the nodes/edges array identity, which also churns on live status updates and
+   * selection changes that must NOT reset the debounce.
+   */
+  editSeq: number
   selectedNodeId: string | null
   selectedNodeIds: string[]
   scanEventTs: number
@@ -187,10 +195,33 @@ interface CanvasState {
   applyAllCustomStyles: (def: CustomStyleDef) => void
 }
 
-export const useCanvasStore = create<CanvasState>((set) => ({
+export const useCanvasStore = create<CanvasState>((rawSet) => {
+  // Wrap set so any update that flips hasUnsavedChanges to true also bumps
+  // editSeq. This centralises the "an edit happened" signal instead of touching
+  // every one of the ~two dozen mutating actions. Actions that update state
+  // without dirtying (setNodeStatus, markSaved, loadCanvas, selection) omit
+  // hasUnsavedChanges or set it false, so they never bump the counter.
+  const set: typeof rawSet = ((partial, replace) => {
+    rawSet((state) => {
+      const next = typeof partial === 'function'
+        ? (partial as (s: CanvasState) => Partial<CanvasState>)(state)
+        : partial
+      if (
+        next &&
+        typeof next === 'object' &&
+        (next as Partial<CanvasState>).hasUnsavedChanges === true &&
+        !('editSeq' in next)
+      ) {
+        return { ...next, editSeq: state.editSeq + 1 }
+      }
+      return next
+    }, replace as false | undefined)
+  }) as typeof rawSet
+  return {
   nodes: [],
   edges: [],
   hasUnsavedChanges: false,
+  editSeq: 0,
   selectedNodeId: null,
   selectedNodeIds: [],
   editingGroupRectId: null,
@@ -347,19 +378,26 @@ export const useCanvasStore = create<CanvasState>((set) => ({
       // they don't follow a moved node on their own. Translate them by the same
       // delta the node moved so a clean routing stays clean after a drag (#279).
       const edges = translateWaypointsForMovedNodes(changes, state.nodes, nodes, state.edges)
+      // Only set hasUnsavedChanges when a real edit occurred, so the set() wrapper
+      // bumps editSeq only then. Selection- or measure-only changes leave the flag
+      // untouched (carried over) and must not reset the autosave debounce.
+      const edited = changes.some(isUserNodeEdit)
       return {
         nodes,
         edges,
         selectedNodeIds,
-        hasUnsavedChanges: state.hasUnsavedChanges || changes.some(isUserNodeEdit),
+        ...(edited ? { hasUnsavedChanges: true } : {}),
       }
     }),
 
   onEdgesChange: (changes) =>
-    set((state) => ({
-      edges: applyEdgeChanges(changes, state.edges),
-      hasUnsavedChanges: state.hasUnsavedChanges || changes.some((c) => c.type !== 'select'),
-    })),
+    set((state) => {
+      const edited = changes.some((c) => c.type !== 'select')
+      return {
+        edges: applyEdgeChanges(changes, state.edges),
+        ...(edited ? { hasUnsavedChanges: true } : {}),
+      }
+    }),
 
   onConnect: (connection) =>
     set((state) => {
@@ -1013,4 +1051,5 @@ export const useCanvasStore = create<CanvasState>((set) => ({
       })
       return { nodes, edges, hasUnsavedChanges: true }
     }),
-}))
+  }
+})
