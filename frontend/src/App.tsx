@@ -37,6 +37,8 @@ import { ScanHistoryModal } from '@/components/modals/ScanHistoryModal'
 import { ShortcutsModal } from '@/components/modals/ShortcutsModal'
 import { ConfirmAddToGroupModal } from '@/components/modals/ConfirmAddToGroupModal'
 import { useCanvasStore } from '@/stores/canvasStore'
+import { readAutosaveSettings, subscribeAutosaveSettings, type AutosaveSettings } from '@/utils/autosaveSettings'
+import { useAutosave } from '@/hooks/useAutosave'
 import { useDesignStore } from '@/stores/designStore'
 import { useAuthStore } from '@/stores/authStore'
 import { useThemeStore } from '@/stores/themeStore'
@@ -53,13 +55,24 @@ import { buildProxmoxClusterEdges } from '@/components/proxmox/clusterEdges'
 const STANDALONE = import.meta.env.VITE_STANDALONE === 'true'
 
 export default function App() {
-  const { loadCanvas, applyLayout, markSaved, markUnsaved, selectedNodeId, selectedNodeIds, addNode, updateNode, deleteNode, onConnect, updateEdge, deleteEdge, setProxmoxContainerMode, setNodeZIndex, editingGroupRectId, setEditingGroupRectId, editingTextId, setEditingTextId, nodes, edges, snapshotHistory, undo, redo, addToGroup, addToContainer, floorMap, setFloorMap } = useCanvasStore()
+  const { loadCanvas, applyLayout, markSaved, markUnsaved, hasUnsavedChanges, editSeq, selectedNodeId, selectedNodeIds, addNode, updateNode, deleteNode, onConnect, updateEdge, deleteEdge, setProxmoxContainerMode, setNodeZIndex, editingGroupRectId, setEditingGroupRectId, editingTextId, setEditingTextId, nodes, edges, snapshotHistory, undo, redo, addToGroup, addToContainer, floorMap, setFloorMap } = useCanvasStore()
   const canvasRef = useRef<HTMLDivElement>(null)
   const { isAuthenticated } = useAuthStore()
   const { activeTheme, setTheme, customStyle, setCustomStyle } = useThemeStore()
   const { activeDesignId, setDesigns, setActiveDesign } = useDesignStore()
 
   useStatusPolling()
+
+  const [autosave, setAutosave] = useState<AutosaveSettings>(readAutosaveSettings)
+  useEffect(() => subscribeAutosaveSettings(setAutosave), [])
+
+  // Provenance: which design the in-memory canvas was loaded as. Differs from
+  // activeDesignId (the selection) during a switch, so autosave gates on this to
+  // avoid writing one design's canvas under another's id. Ref mirror for the
+  // fire-time guard, which must read the live value without re-arming the timer.
+  const [loadedDesignId, setLoadedDesignId] = useState<string | null>(null)
+  const loadedDesignIdRef = useRef<string | null>(loadedDesignId)
+  useEffect(() => { loadedDesignIdRef.current = loadedDesignId }, [loadedDesignId])
 
   const [themeModalOpen, setThemeModalOpen] = useState(false)
   const [styleEditorType, setStyleEditorType] = useState<NodeType | null>(null)
@@ -93,7 +106,7 @@ export default function App() {
   // Declare handleSave before the Ctrl+S effect so it is in scope.
   // Returns true on success, false on failure — the design-switch effect relies
   // on this to avoid loading (and clobbering) the canvas when a save fails.
-  const handleSave = useCallback(async (designIdOverride?: string): Promise<boolean> => {
+  const handleSave = useCallback(async (designIdOverride?: string, options?: { silent?: boolean }): Promise<boolean> => {
     try {
       const saveDesignId = designIdOverride ?? activeDesignId
       if (STANDALONE) {
@@ -101,7 +114,7 @@ export default function App() {
         // Floor plans are backend-only (upload/serve), so standalone never persists one.
         standaloneStorage.saveCanvas(saveDesignId, { nodes, edges, theme_id: activeTheme, custom_style: customStyle })
         markSaved()
-        toast.success('Canvas saved')
+        if (!options?.silent) toast.success('Canvas saved')
         return true
       }
       const nodesToSave = nodes.map(serializeNode)
@@ -110,7 +123,7 @@ export default function App() {
       if (floorMap) viewport.floor_map = floorMap
       await canvasApi.save({ nodes: nodesToSave, edges: edgesToSave, viewport, custom_style: customStyle, design_id: saveDesignId })
       markSaved()
-      toast.success('Canvas saved')
+      if (!options?.silent) toast.success('Canvas saved')
       return true
     } catch {
       toast.error('Save failed')
@@ -121,6 +134,21 @@ export default function App() {
   // Keep a ref so the keydown handler always calls the latest version
   const handleSaveRef = useRef(handleSave)
   useEffect(() => { handleSaveRef.current = handleSave }, [handleSave])
+
+  // Debounced, opt-in autosave. Pins the active design when armed and re-checks
+  // it at fire time so a mid-switch save can't clobber the wrong design.
+  useAutosave({
+    enabled: autosave.enabled,
+    delaySeconds: autosave.delay,
+    hasUnsavedChanges,
+    designId: loadedDesignId,
+    // Debounce resets on each real user edit (editSeq), not on raw nodes/edges
+    // identity — live status polling churns those arrays without a user edit and
+    // would otherwise keep re-arming (and starving) the timer during monitoring.
+    changeSignals: [editSeq],
+    getLiveDesignId: () => loadedDesignIdRef.current,
+    onSave: (designId) => { void handleSaveRef.current(designId, { silent: true }) },
+  })
 
   const loadCanvasFromApi = useCallback(async (designId?: string) => {
     try {
@@ -151,6 +179,9 @@ export default function App() {
     } catch {
       setFloorMap(null)
       loadCanvas(demoNodes, demoEdges)
+    } finally {
+      // Record provenance so autosave writes back under the design just loaded.
+      setLoadedDesignId(designId ?? null)
     }
   }, [loadCanvas, setTheme, setCustomStyle, setFloorMap])
 
@@ -169,6 +200,8 @@ export default function App() {
       setFloorMap(null)
       loadCanvas(demoNodes, demoEdges)
     }
+    // Record provenance so autosave writes back under the design just loaded.
+    setLoadedDesignId(designId)
   }, [loadCanvas, setTheme, setCustomStyle, setFloorMap])
 
   const loadDesignsAndCanvas = useCallback(async () => {

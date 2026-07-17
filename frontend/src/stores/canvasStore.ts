@@ -23,6 +23,22 @@ type Clipboard = { nodes: Node<NodeData>[]; edges: Edge<EdgeData>[] }
 const parentIdOf = (n: Node<NodeData>): string | undefined => n.parentId ?? n.data.parent_id ?? undefined
 
 /**
+ * Whether a node change represents a real user edit that should dirty the canvas.
+ * Excludes:
+ *  - 'select': selecting a node changes nothing persisted.
+ *  - 'dimensions' without resizing: React Flow emits these when it first measures
+ *    a node's size after mount/load. Counting them as edits marks a freshly
+ *    loaded canvas dirty before the user touches anything (autosave would then
+ *    save on every load). A user-driven resize sets `resizing === true` and still
+ *    dirties.
+ */
+function isUserNodeEdit(c: NodeChange<Node<NodeData>>): boolean {
+  if (c.type === 'select') return false
+  if (c.type === 'dimensions' && c.resizing !== true) return false
+  return true
+}
+
+/**
  * Keep manually-routed edge waypoints attached to their nodes on drag (#279).
  *
  * Waypoints live in absolute canvas coords, so they don't move when a connected
@@ -93,6 +109,14 @@ interface CanvasState {
   nodes: Node<NodeData>[]
   edges: Edge<EdgeData>[]
   hasUnsavedChanges: boolean
+  /**
+   * Monotonic counter incremented on every real user edit (auto-bumped whenever
+   * an action sets hasUnsavedChanges to true). Consumers that need to react to
+   * *edits specifically* — e.g. the autosave debounce — key off this instead of
+   * the nodes/edges array identity, which also churns on live status updates and
+   * selection changes that must NOT reset the debounce.
+   */
+  editSeq: number
   selectedNodeId: string | null
   selectedNodeIds: string[]
   scanEventTs: number
@@ -127,6 +151,14 @@ interface CanvasState {
   setSelectedNode: (id: string | null) => void
   addNode: (node: Node<NodeData>) => void
   updateNode: (id: string, data: Partial<NodeData>) => void
+  /**
+   * Apply a live status update to a node WITHOUT marking the canvas unsaved.
+   * Status (online/offline, response time, last seen) is transient monitoring
+   * data pushed by the backend, not a user edit — dirtying the canvas here would
+   * make autosave rewrite an untouched canvas on every status cycle and could
+   * clobber edits made elsewhere. Mirrors setServiceStatuses' live-overlay rule.
+   */
+  setNodeStatus: (id: string, status: Pick<NodeData, 'status' | 'response_time_ms' | 'last_seen'>) => void
   deleteNode: (id: string) => void
   updateEdge: (id: string, data: Partial<EdgeData>) => void
   reconnectEdge: (id: string, connection: Connection) => void
@@ -163,10 +195,33 @@ interface CanvasState {
   applyAllCustomStyles: (def: CustomStyleDef) => void
 }
 
-export const useCanvasStore = create<CanvasState>((set) => ({
+export const useCanvasStore = create<CanvasState>((rawSet) => {
+  // Wrap set so any update that flips hasUnsavedChanges to true also bumps
+  // editSeq. This centralises the "an edit happened" signal instead of touching
+  // every one of the ~two dozen mutating actions. Actions that update state
+  // without dirtying (setNodeStatus, markSaved, loadCanvas, selection) omit
+  // hasUnsavedChanges or set it false, so they never bump the counter.
+  const set: typeof rawSet = ((partial, replace) => {
+    rawSet((state) => {
+      const next = typeof partial === 'function'
+        ? (partial as (s: CanvasState) => Partial<CanvasState>)(state)
+        : partial
+      if (
+        next &&
+        typeof next === 'object' &&
+        (next as Partial<CanvasState>).hasUnsavedChanges === true &&
+        !('editSeq' in next)
+      ) {
+        return { ...next, editSeq: state.editSeq + 1 }
+      }
+      return next
+    }, replace as false | undefined)
+  }) as typeof rawSet
+  return {
   nodes: [],
   edges: [],
   hasUnsavedChanges: false,
+  editSeq: 0,
   selectedNodeId: null,
   selectedNodeIds: [],
   editingGroupRectId: null,
@@ -323,19 +378,26 @@ export const useCanvasStore = create<CanvasState>((set) => ({
       // they don't follow a moved node on their own. Translate them by the same
       // delta the node moved so a clean routing stays clean after a drag (#279).
       const edges = translateWaypointsForMovedNodes(changes, state.nodes, nodes, state.edges)
+      // Only set hasUnsavedChanges when a real edit occurred, so the set() wrapper
+      // bumps editSeq only then. Selection- or measure-only changes leave the flag
+      // untouched (carried over) and must not reset the autosave debounce.
+      const edited = changes.some(isUserNodeEdit)
       return {
         nodes,
         edges,
         selectedNodeIds,
-        hasUnsavedChanges: state.hasUnsavedChanges || changes.some((c) => c.type !== 'select'),
+        ...(edited ? { hasUnsavedChanges: true } : {}),
       }
     }),
 
   onEdgesChange: (changes) =>
-    set((state) => ({
-      edges: applyEdgeChanges(changes, state.edges),
-      hasUnsavedChanges: state.hasUnsavedChanges || changes.some((c) => c.type !== 'select'),
-    })),
+    set((state) => {
+      const edited = changes.some((c) => c.type !== 'select')
+      return {
+        edges: applyEdgeChanges(changes, state.edges),
+        ...(edited ? { hasUnsavedChanges: true } : {}),
+      }
+    }),
 
   onConnect: (connection) =>
     set((state) => {
@@ -466,6 +528,18 @@ export const useCanvasStore = create<CanvasState>((set) => ({
       }
 
       return { nodes, edges, hasUnsavedChanges: true }
+    }),
+
+  setNodeStatus: (id, status) =>
+    set((state) => {
+      let changed = false
+      const nodes = state.nodes.map((n) => {
+        if (n.id !== id) return n
+        changed = true
+        return { ...n, data: { ...n.data, ...status } }
+      })
+      // No hasUnsavedChanges: live status is monitoring data, not a user edit.
+      return changed ? { nodes } : {}
     }),
 
   deleteNode: (id) =>
@@ -977,4 +1051,5 @@ export const useCanvasStore = create<CanvasState>((set) => ({
       })
       return { nodes, edges, hasUnsavedChanges: true }
     }),
-}))
+  }
+})
