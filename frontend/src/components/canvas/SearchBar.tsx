@@ -45,43 +45,45 @@ export function SearchBar({ onOpenPending }: SearchBarProps) {
   const q = query.toLowerCase().trim()
 
   const nodeResults = q
-  ? nodes.flatMap((n) => {
-      if (n.data.type === 'groupRect') return []
+    ? nodes.flatMap((n) => {
+        if (n.data.type === 'groupRect') return []
 
-      const contains = (v?: string | null) => v?.toLowerCase().includes(q)
+        const contains = (v?: string | null) => v?.toLowerCase().includes(q)
 
-      const matches: Array<{ key: string; display_value: string }> = []
+        const matches: Array<{ key: string; display_value: string }> = []
 
-      for (const [key, value] of [
-        ['label', n.data.label],
-        ['notes', n.data.notes],
-        ['ip', n.data.ip],
-        ['hostname', n.data.hostname],
-      ] as const) {
-        if (contains(value)) {
-          matches.push({ key, display_value: value ?? '' })
+        // Label matches make the node a result, but it is already shown in the
+        // header — don't repeat it in the matched-values column.
+        const labelMatch = contains(n.data.label)
+
+        for (const [key, value] of [
+          ['notes', n.data.notes],
+          ['ip', n.data.ip],
+          ['hostname', n.data.hostname],
+        ] as const) {
+          if (contains(value)) {
+            matches.push({ key, display_value: value ?? '' })
+          }
         }
-      }
 
-      for (const s of n.data.services ?? []) {
-        if (contains(s.service_name)) {
-          matches.push({ key: 'services', display_value: s.service_name ?? '' })
+        for (const s of n.data.services ?? []) {
+          if (contains(s.service_name)) {
+            matches.push({ key: 'services', display_value: s.service_name ?? '' })
+          }
         }
-      }
 
-      for (const p of (n.data.properties ?? []).filter((p) => p.visible)) {
-        if (contains(p.key) || contains(p.value)) {
-          matches.push({
-            key: 'properties',
-            display_value: `${p.key ?? ''} = ${p.value ?? ''}`,
-          })
+        for (const p of (n.data.properties ?? []).filter((p) => p.visible)) {
+          if (contains(p.key) || contains(p.value)) {
+            matches.push({
+              key: 'properties',
+              display_value: `${p.key ?? ''} = ${p.value ?? ''}`,
+            })
+          }
         }
-      }
 
-      return matches.length > 0 ? [{ node: n, matches: matches }] : []
-    })
-  : [];
-    
+        return labelMatch || matches.length > 0 ? [{ node: n, matches }] : []
+      })
+    : []
 
   const pendingResults = q
     ? pendingDevices.filter((d) =>
@@ -193,8 +195,8 @@ export function SearchBar({ onOpenPending }: SearchBarProps) {
                 </span>
                 {n.matches.length > 0 && (
                   <span style={{ maxWidth: "50%", display: 'flex', flexDirection: 'column', gap: 2, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
-                    {n.matches.map((m) => (
-                      <span key={m.display_value} style={{ fontSize: 11, color: '#8b949e', fontFamily: 'JetBrains Mono, monospace', flexShrink: 0, display: 'inline-block' }}>
+                    {n.matches.map((m, mIdx) => (
+                      <span key={`${m.key}-${mIdx}`} style={{ fontSize: 11, color: '#8b949e', fontFamily: 'JetBrains Mono, monospace', flexShrink: 0, display: 'inline-block' }}>
                         {m.display_value}
                       </span>
                     ))}
