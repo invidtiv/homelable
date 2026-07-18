@@ -22,6 +22,23 @@ async def test_load_canvas_empty(client: AsyncClient, headers: dict):
     assert data["viewport"] == {"x": 0, "y": 0, "zoom": 1}
 
 
+async def test_load_canvas_uninitialized_reports_initialized_false(client: AsyncClient, headers: dict):
+    # A never-saved canvas has no CanvasState row → initialized False. The frontend
+    # uses this to show the demo canvas only to genuinely new users.
+    data = (await client.get("/api/v1/canvas", headers=headers)).json()
+    assert data["initialized"] is False
+
+
+async def test_load_canvas_initialized_true_after_save(client: AsyncClient, headers: dict):
+    # Saving an EMPTY canvas still creates a CanvasState row, so a subsequently
+    # loaded empty canvas is reported initialized — the user cleared it on purpose
+    # and must not get the demo re-seeded.
+    await client.post("/api/v1/canvas/save", json={"nodes": [], "edges": [], "viewport": {}}, headers=headers)
+    data = (await client.get("/api/v1/canvas", headers=headers)).json()
+    assert data["nodes"] == []
+    assert data["initialized"] is True
+
+
 async def test_load_canvas_requires_auth(client: AsyncClient):
     res = await client.get("/api/v1/canvas")
     assert res.status_code == 401

@@ -45,6 +45,7 @@ import { useThemeStore } from '@/stores/themeStore'
 import { canvasApi, designsApi, liveviewApi } from '@/api/client'
 import * as standaloneStorage from '@/utils/standaloneStorage'
 import { demoNodes, demoEdges } from '@/utils/demoData'
+import { decideCanvasLoad, isNewUserCanvas } from '@/utils/canvasLoadDecision'
 import { useStatusPolling } from '@/hooks/useStatusPolling'
 import type { NodeData, EdgeData, CustomStyleDef, FloorMapConfig, NodeType } from '@/types'
 import type { ZigbeeNode, ZigbeeEdge } from '@/components/zigbee/types'
@@ -73,6 +74,13 @@ export default function App() {
   const [loadedDesignId, setLoadedDesignId] = useState<string | null>(null)
   const loadedDesignIdRef = useRef<string | null>(loadedDesignId)
   useEffect(() => { loadedDesignIdRef.current = loadedDesignId }, [loadedDesignId])
+
+  // True while the last canvas load failed (backend down/error). Drives the error
+  // banner and keeps us from masking a real failure with the demo canvas.
+  const [loadError, setLoadError] = useState(false)
+  // True when the loaded canvas is the demo (a brand-new user). Reserved as the
+  // entry signal for the upcoming Getting Started walkthrough.
+  const [isNewUser, setIsNewUser] = useState(false)
 
   const [themeModalOpen, setThemeModalOpen] = useState(false)
   const [styleEditorType, setStyleEditorType] = useState<NodeType | null>(null)
@@ -151,55 +159,83 @@ export default function App() {
   })
 
   const loadCanvasFromApi = useCallback(async (designId?: string) => {
+    let res
     try {
-      const res = await canvasApi.load(designId)
-      const { nodes: apiNodes, edges: apiEdges } = res.data
-      if (apiNodes.length > 0) {
-        const proxmoxContainerMap = new Map<string, boolean>(
-          (apiNodes as ApiNode[])
-            .filter((n) => n.type === 'group' || n.container_mode === true)
-            .map((n) => [n.id, true])
-        )
-        const { nodes: rfNodes, edges: rfEdges } = migrateClusterHandles(
-          (apiNodes as ApiNode[]).map((n) => deserializeApiNode(n, proxmoxContainerMap)),
-          (apiEdges as ApiEdge[]).map(deserializeApiEdge),
-        )
-        const savedTheme = res.data.viewport?.theme_id
-        if (savedTheme) setTheme(savedTheme)
-        if (res.data.custom_style) setCustomStyle(res.data.custom_style as CustomStyleDef)
-        const savedFloorMap = res.data.viewport?.floor_map as FloorMapConfig | undefined
-        // Clear when the target design has no floor plan, so it doesn't bleed
-        // across canvases when switching designs.
-        setFloorMap(savedFloorMap ?? null)
-        loadCanvas(rfNodes, rfEdges)
-      } else {
-        setFloorMap(null)
-        loadCanvas(demoNodes, demoEdges)
-      }
+      res = await canvasApi.load(designId)
     } catch {
+      // Backend down / errored. Surface it and STOP — never fall back to the demo
+      // canvas, which would hide the real error and look like a fresh account.
+      // Leave the on-screen canvas and provenance untouched so an autosave can't
+      // clobber real data with an empty canvas.
+      setLoadError(true)
+      toast.error('Could not load canvas — backend not responding')
+      return
+    }
+    const { nodes: apiNodes, edges: apiEdges } = res.data
+    const mode = decideCanvasLoad(apiNodes.length > 0, res.data.initialized === true)
+    if (mode === 'real') {
+      const proxmoxContainerMap = new Map<string, boolean>(
+        (apiNodes as ApiNode[])
+          .filter((n) => n.type === 'group' || n.container_mode === true)
+          .map((n) => [n.id, true])
+      )
+      const { nodes: rfNodes, edges: rfEdges } = migrateClusterHandles(
+        (apiNodes as ApiNode[]).map((n) => deserializeApiNode(n, proxmoxContainerMap)),
+        (apiEdges as ApiEdge[]).map(deserializeApiEdge),
+      )
+      const savedTheme = res.data.viewport?.theme_id
+      if (savedTheme) setTheme(savedTheme)
+      if (res.data.custom_style) setCustomStyle(res.data.custom_style as CustomStyleDef)
+      const savedFloorMap = res.data.viewport?.floor_map as FloorMapConfig | undefined
+      // Clear when the target design has no floor plan, so it doesn't bleed
+      // across canvases when switching designs.
+      setFloorMap(savedFloorMap ?? null)
+      loadCanvas(rfNodes, rfEdges)
+    } else if (mode === 'empty') {
+      // Initialized but no nodes: the user cleared this canvas on purpose — respect
+      // it and keep it empty instead of re-seeding the demo.
+      const savedTheme = res.data.viewport?.theme_id
+      if (savedTheme) setTheme(savedTheme)
+      if (res.data.custom_style) setCustomStyle(res.data.custom_style as CustomStyleDef)
+      setFloorMap(null)
+      loadCanvas([], [])
+    } else {
+      // Brand-new, never-saved canvas: seed the demo.
       setFloorMap(null)
       loadCanvas(demoNodes, demoEdges)
-    } finally {
-      // Record provenance so autosave writes back under the design just loaded.
-      setLoadedDesignId(designId ?? null)
     }
+    setLoadError(false)
+    setIsNewUser(isNewUserCanvas(mode))
+    // Record provenance so autosave writes back under the design just loaded.
+    setLoadedDesignId(designId ?? null)
   }, [loadCanvas, setTheme, setCustomStyle, setFloorMap])
 
   // Standalone counterpart of loadCanvasFromApi — reads a design's canvas from
   // localStorage, falling back to the demo canvas when it has never been saved.
   const loadStandaloneCanvas = useCallback((designId: string) => {
     const saved = standaloneStorage.loadCanvas(designId)
-    if (saved && saved.nodes.length > 0) {
+    // A stored entry (even with zero nodes) means the user has saved this canvas,
+    // so treat it as initialized and don't re-seed the demo on top of a canvas
+    // they deliberately cleared.
+    const mode = decideCanvasLoad((saved?.nodes.length ?? 0) > 0, saved !== null)
+    if (mode === 'real' && saved) {
       if (saved.theme_id) setTheme(saved.theme_id)
       if (saved.custom_style) setCustomStyle(saved.custom_style)
       // Floor plans are backend-only; keep the store clear in standalone mode.
       setFloorMap(null)
       const migrated = migrateClusterHandles(saved.nodes, saved.edges)
       loadCanvas(migrated.nodes, migrated.edges)
+    } else if (mode === 'empty' && saved) {
+      if (saved.theme_id) setTheme(saved.theme_id)
+      if (saved.custom_style) setCustomStyle(saved.custom_style)
+      setFloorMap(null)
+      loadCanvas([], [])
     } else {
       setFloorMap(null)
       loadCanvas(demoNodes, demoEdges)
     }
+    setLoadError(false)
+    setIsNewUser(isNewUserCanvas(mode))
     // Record provenance so autosave writes back under the design just loaded.
     setLoadedDesignId(designId)
   }, [loadCanvas, setTheme, setCustomStyle, setFloorMap])
@@ -231,15 +267,23 @@ export default function App() {
         await loadCanvasFromApi(targetId)
       }
     } catch {
-      // If API fails (e.g. fresh DB with no designs), fall back to demo data
-      loadCanvas(demoNodes, demoEdges)
+      // Backend unreachable/errored — surface it. Do NOT seed the demo: that would
+      // hide a real outage behind a fake "new account" canvas.
+      setLoadError(true)
+      toast.error('Could not reach backend — check the server and retry')
     }
-  }, [setDesigns, setActiveDesign, loadCanvasFromApi, loadStandaloneCanvas, activeDesignId, loadCanvas])
+  }, [setDesigns, setActiveDesign, loadCanvasFromApi, loadStandaloneCanvas, activeDesignId])
 
   // Keep a ref so the auth effect can call the latest loader without listing it
   // as a dependency (which would re-fire on every design switch).
   const loadDesignsAndCanvasRef = useRef(loadDesignsAndCanvas)
   useEffect(() => { loadDesignsAndCanvasRef.current = loadDesignsAndCanvas }, [loadDesignsAndCanvas])
+
+  // Retry a failed load from the error banner.
+  const handleRetryLoad = useCallback(() => {
+    setLoadError(false)
+    void loadDesignsAndCanvasRef.current()
+  }, [])
 
   // Load designs + canvas on auth (or immediately in standalone mode, which has
   // no auth gate).
@@ -825,7 +869,9 @@ export default function App() {
   return (
     <TooltipProvider>
       <ReactFlowProvider>
-        <div className="flex h-screen w-screen overflow-hidden bg-[#0d1117]">
+        {/* data-new-user marks a first-time (demo) canvas — the hook the upcoming
+            Getting Started walkthrough keys off. */}
+        <div className="flex h-screen w-screen overflow-hidden bg-[#0d1117]" data-new-user={isNewUser}>
           <Sidebar
             onAddNode={() => setAddNodeOpen(true)}
             onAddGroupRect={() => setAddGroupRectOpen(true)}
@@ -840,6 +886,21 @@ export default function App() {
             onOpenPending={openPendingModal}
           />
           <div className="flex flex-col flex-1 min-w-0">
+            {loadError && (
+              <div
+                role="alert"
+                className="flex items-center justify-between gap-3 bg-[#3d1418] border-b border-[#f85149] px-4 py-2 text-sm text-[#ffa198]"
+              >
+                <span>Backend not responding — the canvas could not be loaded.</span>
+                <button
+                  type="button"
+                  onClick={handleRetryLoad}
+                  className="rounded border border-[#f85149] px-2 py-0.5 text-[#ffa198] hover:bg-[#f85149]/20"
+                >
+                  Retry
+                </button>
+              </div>
+            )}
             <Toolbar
               onSave={handleSave}
               onAutoLayout={handleAutoLayout}

@@ -37,6 +37,9 @@ async def load_canvas(
         edges=[EdgeResponse.model_validate(e) for e in edges],
         viewport=viewport,
         custom_style=state.custom_style if state else None,
+        # A CanvasState row exists only after a save (or explicit design create),
+        # so its presence marks an intentional canvas vs. a never-touched one.
+        initialized=state is not None,
     )
 
 

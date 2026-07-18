@@ -84,3 +84,8 @@ class CanvasStateResponse(BaseModel):
     edges: list[EdgeResponse]
     viewport: dict[str, Any]
     custom_style: dict[str, Any] | None = None
+    # True once this design's canvas has ever been persisted (a CanvasState row
+    # exists). Lets the frontend tell a brand-new user (show demo) apart from one
+    # who intentionally cleared their canvas (keep it empty). False also for a
+    # missing/uninitialized design.
+    initialized: bool = False
