@@ -5,6 +5,29 @@ All notable changes to **Homelable** are documented here.
 The format is loosely based on [Keep a Changelog](https://keepachangelog.com/),
 and this project adheres to [Semantic Versioning](https://semver.org/).
 
+## [3.1.0] - 2026-07-18
+
+### Features
+
+- Drag to reorder node properties. (#296)
+- Search for nodes and properties. Thanks @Floyddotnet. (#294)
+- Widen zone modal into two columns. (#293)
+- Autosave canvas after a configurable inactivity delay (opt-in). Thanks @nicolabottini. (#289)
+- MCP: `design_id` on approve_device + `delete_design` tool. Thanks @nicolabottini. (#281)
+
+### Fixes
+
+- Scanner: decouple port discovery from version detection. (#295, #277)
+- Allow undo after Auto Layout and YAML import. (#290)
+- Move edge waypoints when the connected node or its container is dragged. (#288)
+- Keep container host height when editing an unrelated field. (#287)
+- Keep container children in place when editing a host node. Thanks @nicolabottini. (#286)
+- `list_pending_devices` MCP tool leaked approved/hidden inventory rows. Thanks @MikeSviblov. (#273)
+
+### Docs
+
+- Fix MCP client transport to http (was sse). (#275)
+
 ## [3.0.0] - 2026-07-10
 
 ### Added
