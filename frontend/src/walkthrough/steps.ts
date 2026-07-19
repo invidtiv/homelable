@@ -25,14 +25,14 @@ export const STEPS: TourStep[] = [
   {
     id: 'welcome',
     title: 'Welcome to Homelable',
-    body: 'Take a quick tour of the main features — scanning your network, managing devices, and building your canvas. You can skip anytime and restart later from Settings.',
+    body: 'Take a quick tour of the main features : scanning your network, managing devices, and building your canvas. You can skip anytime and restart later from Settings.',
     placement: 'center',
     mode: 'all',
   },
   {
     id: 'scan',
     title: 'Scan your network',
-    body: 'Start here: run an IP scan to auto-discover devices on your network. Pick the ranges and ports, then launch — discovered devices land in your inventory for review.',
+    body: 'Start here: run an IP scan to auto-discover devices on your network. Pick the ranges and ports, then launch, discovered devices land in your inventory for review.',
     anchor: '[data-tour="scan-network"]',
     placement: 'right',
     action: 'openScanConfig',
@@ -41,7 +41,7 @@ export const STEPS: TourStep[] = [
   {
     id: 'scan-history',
     title: 'Follow scan progress',
-    body: 'Scan History shows every run live. A running scan updates in place with elapsed time and device count — you can stop it here too. (This is example data.)',
+    body: 'Scan History shows every run live. A running scan updates in place with elapsed time and device count. You can stop it here too. (This is example data.)',
     placement: 'left',
     action: 'openScanHistoryDemo',
     mode: 'full',
@@ -49,7 +49,7 @@ export const STEPS: TourStep[] = [
   {
     id: 'inventory',
     title: 'Review discovered devices',
-    body: 'Discovered devices wait in your inventory. For each one you can approve it onto the canvas, hide it, or delete it — with detected services and vendor shown. (Example devices.)',
+    body: 'Discovered devices wait in your inventory. For each one you can approve it onto the canvas, hide it, or delete it, with detected services and vendor shown. (Example devices.)',
     placement: 'left',
     action: 'openInventoryDemo',
     mode: 'full',
@@ -73,7 +73,7 @@ export const STEPS: TourStep[] = [
   {
     id: 'text-zone',
     title: 'Annotate with text & zones',
-    body: 'Add free Text labels and Zones (colored rectangles) to document your layout — group a rack, mark a VLAN, or leave a note. Both live under the canvas actions.',
+    body: 'Add free Text labels and Zones (colored rectangles) to document your layout to group a rack, mark a VLAN, or leave a note. Both live under the canvas actions.',
     anchor: '[data-tour="add-zone"]',
     placement: 'right',
     mode: 'all',
@@ -81,7 +81,7 @@ export const STEPS: TourStep[] = [
   {
     id: 'grouping',
     title: 'Group related devices',
-    body: 'Select multiple nodes, then Create Group to box them together and drag them as one — perfect for a rack, a site, or a subnet.',
+    body: 'Select multiple nodes, then Create Group to box them together and drag them as one. Perfect for a rack, a site, or a subnet.',
     anchor: '[data-tour="create-group"]',
     placement: 'left',
     action: 'selectTwoNodes',
@@ -99,7 +99,7 @@ export const STEPS: TourStep[] = [
   {
     id: 'imports',
     title: 'Import from your stack',
-    body: 'Already running Zigbee2MQTT, Z-Wave JS, or Proxmox? Import devices directly from them instead of scanning — one click brings the whole topology in.',
+    body: 'Already running Zigbee2MQTT, Z-Wave JS, or Proxmox? Import devices directly from them instead of scanning. One click brings the whole topology in.',
     anchor: '[data-tour="zigbee-import"]',
     placement: 'right',
     action: 'openZigbeeImport',
