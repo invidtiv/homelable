@@ -32,5 +32,15 @@ describe('Toaster', () => {
     const style = list.getAttribute('style') ?? ''
     expect(style).toContain('--error-bg: #f85149')
     expect(style).toContain('--error-text: #ffffff')
+
+    // richColors must be on for sonner to apply the per-type surface, and the
+    // toast itself must be tagged as an error so it picks up --error-bg.
+    const item = await waitFor(() => {
+      const el = document.querySelector('[data-sonner-toast]') as HTMLElement | null
+      expect(el).not.toBeNull()
+      return el!
+    })
+    expect(item.getAttribute('data-rich-colors')).toBe('true')
+    expect(item.getAttribute('data-type')).toBe('error')
   })
 })
