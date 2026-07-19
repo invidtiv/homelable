@@ -34,6 +34,11 @@ const Toaster = ({ ...props }: ToasterProps) => {
           "--normal-text": "var(--popover-foreground)",
           "--normal-border": "var(--border)",
           "--border-radius": "var(--radius)",
+          // Errors use a red surface so failures (e.g. a failed save while the
+          // backend is down) stand out instead of reading like a normal toast.
+          "--error-bg": "#f85149",
+          "--error-text": "#ffffff",
+          "--error-border": "#da3633",
         } as React.CSSProperties
       }
       toastOptions={{
